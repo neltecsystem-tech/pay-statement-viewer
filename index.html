@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>統合支払明細ビューア</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📑%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  --primary:#4f46e5;--primary-d:#4338ca;--bg:#f8fafc;--card:#ffffff;
+  --border:#e2e8f0;--text:#0f172a;--text-sub:#64748b;--danger:#dc2626;
+  --success:#16a34a;--warning:#f59e0b;
+  --shift:#0ea5e9;--askul:#f97316;--delivery:#10b981;
+}
+*{box-sizing:border-box;}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Yu Gothic UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;}
+.container{max-width:900px;margin:0 auto;padding:16px;}
+header{background:linear-gradient(135deg,var(--primary) 0%,var(--primary-d) 100%);color:#fff;padding:18px 20px;border-radius:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;}
+header h1{margin:0;font-size:18px;font-weight:700;}
+header .sub{font-size:12px;opacity:.85;margin-top:2px;}
+.btn{background:var(--primary);color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;}
+.btn:hover{background:var(--primary-d);}
+.btn-secondary{background:#fff;color:var(--primary);border:1px solid #fff;}
+.btn-secondary:hover{background:#eef2ff;}
+.btn-danger{background:var(--danger);color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;}
+.btn-ghost{background:transparent;color:var(--text-sub);border:1px solid var(--border);padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;}
+.input{padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;background:#fff;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px;}
+.card-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#fff;}
+.badge-shift{background:var(--shift);}
+.badge-askul{background:var(--askul);}
+.badge-delivery{background:var(--delivery);}
+.status-pill{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;}
+.status-final{background:#dcfce7;color:#166534;}
+.status-draft{background:#fef3c7;color:#92400e;}
+.status-none{background:#f1f5f9;color:#64748b;}
+.amount-big{font-size:24px;font-weight:700;color:var(--text);}
+.amount-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px;}
+.amount-row .label{color:var(--text-sub);}
+.amount-row .value{font-weight:600;}
+.divider{height:1px;background:var(--border);margin:8px 0;}
+table.detail{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;}
+table.detail th{background:#f1f5f9;padding:5px;border:1px solid #cbd5e1;text-align:center;}
+table.detail td{padding:4px 6px;border:1px solid #e2e8f0;}
+table.detail tr.sun{background:#fee2e2;}
+table.detail tr.sat{background:#fef3c7;}
+.center{text-align:center;}
+.right{text-align:right;}
+.muted{color:var(--text-sub);font-size:12px;}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
+.login-screen{max-width:380px;margin:60px auto;padding:32px;background:#fff;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.08);}
+.login-screen h2{margin:0 0 18px;text-align:center;font-size:20px;color:var(--primary);}
+.login-screen .field{margin-bottom:12px;}
+.login-screen label{display:block;font-size:12px;color:var(--text-sub);margin-bottom:4px;}
+.login-screen input{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:14px;}
+.login-screen .err{color:var(--danger);font-size:13px;margin-bottom:10px;display:none;}
+.login-screen .btn-block{width:100%;padding:12px;font-size:15px;}
+.detail-toggle{background:none;border:none;color:var(--primary);cursor:pointer;font-size:12px;padding:0;margin-top:6px;}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid #c7d2fe;border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.empty{text-align:center;color:var(--text-sub);padding:24px;font-size:13px;}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:flex;justify-content:center;align-items:center;padding:20px;}
+.modal{background:#fff;border-radius:14px;padding:28px;max-width:380px;width:100%;}
+.modal h3{margin:0 0 8px;font-size:18px;}
+.modal p{margin:0 0 16px;font-size:13px;color:var(--text-sub);}
+.summary-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;}
+.summary-label{font-size:13px;color:var(--text-sub);}
+.summary-value{font-size:14px;font-weight:600;}
+.grand-total-card{background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid var(--warning);border-radius:12px;padding:16px;margin-bottom:16px;text-align:center;}
+.grand-total-card .label{font-size:12px;color:#92400e;font-weight:600;}
+.grand-total-card .value{font-size:30px;font-weight:700;color:#92400e;margin-top:4px;}
+@media(max-width:600px){
+  .container{padding:10px;}
+  header{padding:14px;}
+  header h1{font-size:16px;}
+  .amount-big{font-size:20px;}
+  .grand-total-card .value{font-size:24px;}
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="container">
+    <div id="screen-login" class="login-screen">
+      <h2>📑 統合支払明細ビューア</h2>
+      <div class="field">
+        <label>メールアドレス</label>
+        <input type="email" id="login-email" autocomplete="email" placeholder="example@neltec.jp">
+      </div>
+      <div class="field">
+        <label>パスワード</label>
+        <input type="password" id="login-pw" autocomplete="current-password" placeholder="NexPort と同じパスワード">
+      </div>
+      <div class="err" id="login-err"></div>
+      <button class="btn btn-block" onclick="doLogin()">ログイン</button>
+      <p class="muted" style="margin-top:14px;text-align:center;font-size:11px;">
+        NexPort と同じメール・パスワードでログインしてください。<br>
+        アカウントが無い方は管理者にお問い合わせください。
+      </p>
+    </div>
+
+    <div id="screen-main" style="display:none;">
+      <header>
+        <div>
+          <h1>📑 統合支払明細ビューア</h1>
+          <div class="sub" id="hdr-user">読み込み中...</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-secondary" onclick="changePhone()" title="登録電話番号を変更">📱 電話変更</button>
+          <button class="btn btn-secondary" onclick="doLogout()">ログアウト</button>
+        </div>
+      </header>
+
+      <div class="toolbar">
+        <label>対象月:</label>
+        <input type="month" id="ym-input" class="input">
+        <button class="btn" onclick="loadAll()">読み込み</button>
+        <span id="admin-toggle-wrap" style="display:none;margin-left:auto;">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="admin-mode-cb" onchange="toggleAdminMode()"> 管理者: 任意電話検索
+          </label>
+        </span>
+      </div>
+
+      <div id="admin-phone-bar" style="display:none;margin-bottom:14px;">
+        <div class="card" style="background:#fef3c7;border-color:#f59e0b;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <span style="font-weight:600;font-size:13px;">🔍 他人の明細検索:</span>
+            <input type="tel" id="admin-phone-input" class="input" placeholder="例 090-1234-5678" style="flex:1;min-width:180px;">
+            <button class="btn" onclick="loadByPhone()">検索</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="result-area"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+'use strict';
+
+const SUPABASE_URL='https://nccognptoprhwsbjnwcu.supabase.co';
+const SUPABASE_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jY29nbnB0b3ByaHdzYmpud2N1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNDU0NDEsImV4cCI6MjA4OTkyMTQ0MX0.M3h31uPyKYWlNevVW3OvZOonoTidC1KLZ04sB5nRKzU';
+const ASKUL_URL='https://erfcsnzdooswgpvgrapb.supabase.co/functions/v1/pay-statement-by-phone';
+const ASKUL_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVyZmNzbnpkb29zd2dwdmdyYXBiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NDE3MDYsImV4cCI6MjA5MjQxNzcwNn0.TdP1S8kReDi-ZY0xtL5e8cZc_WsVMLSukY1zSQHNmCQ';
+const DELIVERY_URL='https://ymdaakiwxkjotlmzveom.supabase.co/functions/v1/pay-statement-by-phone';
+const DELIVERY_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InltZGFha2l3eGtqb3RsbXp2ZW9tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg1Njk4MjMsImV4cCI6MjA5NDE0NTgyM30.7T-1IjHuaxORPC31FQ7U6U7o-00_cJzUJIywQqxgrZ8';
+const SHIFT_URL=SUPABASE_URL+'/functions/v1/pay-statement-by-phone';
+
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON);
+
+let session=null;
+let profile=null;// {id, display_name, role, phone}
+
+function $(id){return document.getElementById(id);}
+
+function normalizePhone(s){
+  if(!s)return '';
+  return String(s).replace(/[０-９]/g,ch=>String.fromCharCode(ch.charCodeAt(0)-0xff10+0x30)).replace(/[^\d]/g,'');
+}
+
+function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+function fmtYen(n){return '¥'+Math.round(Number(n)||0).toLocaleString();}
+
+function thisMonth(){
+  const d=new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+async function doLogin(){
+  const email=$('login-email').value.trim();
+  const pw=$('login-pw').value;
+  const err=$('login-err');
+  err.style.display='none';
+  if(!email||!pw){err.textContent='メールとパスワードを入力してください';err.style.display='block';return;}
+  const {data,error}=await sb.auth.signInWithPassword({email,password:pw});
+  if(error){err.textContent='ログイン失敗: '+error.message;err.style.display='block';return;}
+  session=data.session;
+  await postLogin();
+}
+
+async function postLogin(){
+  // profile を取得
+  const {data,error}=await sb.from('profiles').select('id, display_name, role, phone').eq('id',session.user.id).maybeSingle();
+  if(error||!data){
+    alert('プロファイルが見つかりません: '+(error?.message||'unknown'));
+    return doLogout();
+  }
+  profile=data;
+  $('screen-login').style.display='none';
+  $('screen-main').style.display='block';
+  $('hdr-user').textContent=`${profile.display_name||session.user.email}${(profile.role==='admin'||profile.role==='super_admin')?' (管理者)':''}`;
+  $('ym-input').value=thisMonth();
+  if(profile.role==='admin'||profile.role==='super_admin')$('admin-toggle-wrap').style.display='inline-flex';
+
+  if(!profile.phone){
+    await promptPhone();
+  }
+  if(profile.phone)loadAll();
+}
+
+async function promptPhone(){
+  return new Promise(resolve=>{
+    const overlay=document.createElement('div');
+    overlay.className='modal-overlay';
+    overlay.innerHTML=`<div class="modal">
+      <h3>📱 電話番号を登録</h3>
+      <p>支払明細を表示するために、電話番号を登録してください (初回のみ)。新聞シフト/アスクル/デリバリー で登録されている番号と同じものを入力してください。</p>
+      <input type="tel" id="reg-phone" class="input" placeholder="例 090-1234-5678" style="width:100%;margin-bottom:8px;">
+      <div id="reg-err" style="color:var(--danger);font-size:12px;margin-bottom:8px;display:none;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn-ghost" onclick="cancelPhonePrompt()">後で</button>
+        <button class="btn" onclick="savePhonePrompt()">登録</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    window._phonePromptResolve=resolve;
+    window._phonePromptOverlay=overlay;
+  });
+}
+
+window.cancelPhonePrompt=function(){
+  if(window._phonePromptOverlay)window._phonePromptOverlay.remove();
+  if(window._phonePromptResolve)window._phonePromptResolve();
+};
+
+window.savePhonePrompt=async function(){
+  const raw=$('reg-phone').value;
+  const phone=normalizePhone(raw);
+  const err=$('reg-err');
+  err.style.display='none';
+  if(!phone||phone.length<10){err.textContent='正しい電話番号を入力してください';err.style.display='block';return;}
+  const {error}=await sb.from('profiles').update({phone}).eq('id',session.user.id);
+  if(error){err.textContent='保存失敗: '+error.message;err.style.display='block';return;}
+  profile.phone=phone;
+  if(window._phonePromptOverlay)window._phonePromptOverlay.remove();
+  if(window._phonePromptResolve)window._phonePromptResolve();
+};
+
+async function changePhone(){
+  const cur=profile.phone||'';
+  const raw=prompt(`登録電話番号: ${cur||'(未登録)'}\n新しい番号を入力してください (ハイフン可):`,cur);
+  if(raw===null)return;
+  const phone=normalizePhone(raw);
+  if(!phone||phone.length<10){alert('正しい電話番号を入力してください');return;}
+  const {error}=await sb.from('profiles').update({phone}).eq('id',session.user.id);
+  if(error){alert('保存失敗: '+error.message);return;}
+  profile.phone=phone;
+  alert('✓ 電話番号を更新しました');
+  loadAll();
+}
+
+async function doLogout(){
+  await sb.auth.signOut();
+  session=null;profile=null;
+  $('screen-main').style.display='none';
+  $('screen-login').style.display='block';
+  $('login-email').value='';$('login-pw').value='';
+  $('result-area').innerHTML='';
+}
+
+function toggleAdminMode(){
+  const on=$('admin-mode-cb').checked;
+  $('admin-phone-bar').style.display=on?'block':'none';
+}
+
+function loadAll(){
+  const phone=profile.phone;
+  if(!phone){alert('電話番号が未登録です');return;}
+  loadFor(phone);
+}
+
+function loadByPhone(){
+  const raw=$('admin-phone-input').value;
+  const phone=normalizePhone(raw);
+  if(!phone||phone.length<10){alert('電話番号を入力してください');return;}
+  loadFor(phone);
+}
+
+async function loadFor(phone){
+  const ym=$('ym-input').value;
+  if(!ym){alert('対象月を選択してください');return;}
+  const area=$('result-area');
+  area.innerHTML='<div class="card center"><div class="spinner"></div> 3ツールに問い合わせ中...</div>';
+
+  const callEf=async (url,anon)=>{
+    try{
+      const resp=await fetch(url,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+anon},
+        body:JSON.stringify({phone,year_month:ym})
+      });
+      if(!resp.ok)return {error:`HTTP ${resp.status}`};
+      return await resp.json();
+    }catch(e){return {error:e.message};}
+  };
+
+  const [shift,askul,delivery]=await Promise.all([
+    callEf(SHIFT_URL,SUPABASE_ANON),
+    callEf(ASKUL_URL,ASKUL_ANON),
+    callEf(DELIVERY_URL,DELIVERY_ANON),
+  ]);
+
+  renderResults({shift,askul,delivery,ym,phone});
+}
+
+function renderResults({shift,askul,delivery,ym,phone}){
+  const area=$('result-area');
+  const total=(shift?.statements||[]).reduce((s,r)=>s+(r.grand_total||0),0)
+            +(askul?.statements||[]).reduce((s,r)=>s+(r.payment_amount||0),0)
+            +(delivery?.statements||[]).reduce((s,r)=>s+(r.payment_amount||0),0);
+  const foundCount=[shift,askul,delivery].filter(r=>r&&r.found).length;
+
+  let html='';
+  if(foundCount>0){
+    html+=`<div class="grand-total-card">
+      <div class="label">${escHtml(ym)} 合計支払額 (${foundCount}ツール)</div>
+      <div class="value">${fmtYen(total)}</div>
+    </div>`;
+  }
+
+  html+=renderShiftCard(shift,ym);
+  html+=renderAskulCard(askul,ym);
+  html+=renderDeliveryCard(delivery,ym);
+
+  if(foundCount===0){
+    html+=`<div class="card empty">
+      <div style="font-size:32px;margin-bottom:8px;">🔎</div>
+      <div>該当データなし</div>
+      <div class="muted" style="margin-top:6px;">電話番号 ${escHtml(phone)} は3ツールいずれにも登録されていないか、${escHtml(ym)} のデータがありません。</div>
+    </div>`;
+  }
+
+  area.innerHTML=html;
+}
+
+function renderShiftCard(r,ym){
+  let body='';
+  if(r?.error){
+    body=`<div class="empty" style="color:var(--danger);">エラー: ${escHtml(r.error)}</div>`;
+  }else if(!r?.found){
+    body=`<div class="empty">この月の確定明細はまだ公開されていません</div>`;
+  }else{
+    body=(r.statements||[]).map(s=>{
+      const finalized=s.finalized_at?new Date(s.finalized_at).toLocaleString('ja-JP'):'';
+      const modified=s.modified_at?` / 修正 ${new Date(s.modified_at).toLocaleString('ja-JP')}`:'';
+      return `<div style="border-top:1px dashed var(--border);padding-top:10px;margin-top:10px;">
+        <div class="summary-row"><span class="summary-label">スタッフ</span><span class="summary-value">${escHtml(s.staff_name)}${s.primary_area?` (${escHtml(s.primary_area)})`:''}</span></div>
+        <div class="summary-row"><span class="summary-label">朝刊合計</span><span class="summary-value">${fmtYen(s.am_sum)}</span></div>
+        <div class="summary-row"><span class="summary-label">夕刊合計</span><span class="summary-value">${fmtYen(s.pm_sum)}</span></div>
+        <div class="amount-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:8px;"><span class="label">月合計</span><span class="amount-big">${fmtYen(s.grand_total)}</span></div>
+        <div class="muted" style="margin-top:6px;">確定 ${finalized}${modified}</div>
+        <button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
+        <div class="detail-body" style="display:none;">${renderShiftDetail(s.rows||[])}</div>
+      </div>`;
+    }).join('');
+  }
+  return `<div class="card">
+    <div class="card-header"><span class="badge badge-shift">新聞シフト</span>
+      <span class="status-pill ${r?.found?'status-final':'status-none'}">${r?.found?'確定済':'未公開'}</span>
+    </div>
+    ${body}
+  </div>`;
+}
+
+function renderShiftDetail(rows){
+  if(!rows.length)return '<div class="empty">日別データなし</div>';
+  return `<table class="detail">
+    <thead><tr><th>日付</th><th>曜日</th><th>朝刊コース</th><th>朝刊</th><th>夕刊コース</th><th>夕刊</th><th>計</th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const cls=r.dow==='日'?'sun':(r.dow==='土'?'sat':'');
+      return `<tr class="${cls}">
+        <td>${escHtml(r.d||r.ymd||'')}</td>
+        <td class="center">${escHtml(r.dow||'')}</td>
+        <td>${escHtml(r.am_course||'')}</td>
+        <td class="right">${r.am?fmtYen(r.am):''}</td>
+        <td>${escHtml(r.pm_course||'')}</td>
+        <td class="right">${r.pm?fmtYen(r.pm):''}</td>
+        <td class="right" style="font-weight:600;">${fmtYen(r.total||0)}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+function renderAskulCard(r,ym){
+  let body='';
+  if(r?.error){
+    body=`<div class="empty" style="color:var(--danger);">エラー: ${escHtml(r.error)}</div>`;
+  }else if(!r?.found){
+    body=`<div class="empty">${r?.reason==='phone_not_registered'?'電話番号がアスクル管理に未登録です':'この月の確定明細はまだありません'}</div>`;
+  }else{
+    body=(r.statements||[]).map(s=>{
+      const finalized=s.finalized_at?new Date(s.finalized_at).toLocaleString('ja-JP'):'';
+      const modified=s.modified_at?` / 修正 ${new Date(s.modified_at).toLocaleString('ja-JP')}`:'';
+      const hideAmount=s.business_type==='corporation'||s.business_type==='employee';
+      return `<div style="border-top:1px dashed var(--border);padding-top:10px;margin-top:10px;">
+        <div class="summary-row"><span class="summary-label">ドライバー</span><span class="summary-value">${escHtml(s.driver_name)}${s.company_name?` (${escHtml(s.company_name)})`:''}</span></div>
+        ${hideAmount?'<div class="muted">※法人/社員は金額非表示</div>':`
+        <div class="summary-row"><span class="summary-label">売上 (税抜)</span><span class="summary-value">${fmtYen(s.revenue)}</span></div>
+        <div class="summary-row"><span class="summary-label">控除 (-${(s.deduction_rate||0)}%)</span><span class="summary-value" style="color:var(--warning);">-${fmtYen(s.deduction_amount)}</span></div>
+        <div class="amount-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:8px;"><span class="label">支払額</span><span class="amount-big">${fmtYen(s.payment_amount)}</span></div>
+        `}
+        <div class="muted" style="margin-top:6px;">確定 ${finalized}${modified}</div>
+        ${hideAmount?'':`<button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
+        <div class="detail-body" style="display:none;">${renderAskulDetail(s.daily_rows||[])}</div>`}
+      </div>`;
+    }).join('');
+  }
+  return `<div class="card">
+    <div class="card-header"><span class="badge badge-askul">アスクル</span>
+      <span class="status-pill ${r?.found?'status-final':'status-none'}">${r?.found?'確定済':'未公開'}</span>
+    </div>
+    ${body}
+  </div>`;
+}
+
+function renderAskulDetail(rows){
+  if(!rows.length)return '<div class="empty">日別データなし</div>';
+  const dow=['日','月','火','水','木','金','土'];
+  return `<table class="detail">
+    <thead><tr><th>日付</th><th>曜日</th><th>個建</th><th>車建</th><th>件数</th><th>小計</th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const d=new Date(r.date);
+      const dn=d.getDay();
+      const cls=dn===0?'sun':(dn===6?'sat':'');
+      return `<tr class="${cls}">
+        <td>${escHtml(r.date||'')}</td>
+        <td class="center">${dow[dn]||''}</td>
+        <td class="right">${r.kodate?fmtYen(r.kodate):''}</td>
+        <td class="right">${r.vehicle?fmtYen(r.vehicle):''}</td>
+        <td class="right">${r.count||''}</td>
+        <td class="right" style="font-weight:600;">${fmtYen(r.subtotal||0)}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+function renderDeliveryCard(r,ym){
+  let body='';
+  if(r?.error){
+    body=`<div class="empty" style="color:var(--danger);">エラー: ${escHtml(r.error)}</div>`;
+  }else if(!r?.found){
+    body=`<div class="empty">${r?.reason==='phone_not_registered'?'電話番号がデリバリー管理に未登録です':'稼働実績がありません'}</div>`;
+  }else{
+    body=(r.statements||[]).map(s=>{
+      const status=s.finalized?`<span class="status-pill status-final">確定</span>`:`<span class="status-pill status-draft">未確定 (集計値)</span>`;
+      const finalized=s.finalized_at?new Date(s.finalized_at).toLocaleString('ja-JP'):'';
+      return `<div style="border-top:1px dashed var(--border);padding-top:10px;margin-top:10px;">
+        <div class="summary-row"><span class="summary-label">ドライバー</span><span class="summary-value">${escHtml(s.driver_name)} ${status}</span></div>
+        <div class="summary-row"><span class="summary-label">売上</span><span class="summary-value">${fmtYen(s.revenue)}</span></div>
+        ${s.allowance_total?`<div class="summary-row"><span class="summary-label">追加支給</span><span class="summary-value">${fmtYen(s.allowance_total)}</span></div>`:''}
+        ${s.deduction_amount?`<div class="summary-row"><span class="summary-label">控除</span><span class="summary-value" style="color:var(--warning);">-${fmtYen(s.deduction_amount)}</span></div>`:''}
+        <div class="amount-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:8px;"><span class="label">${s.finalized?'支払額 (確定)':'支払額 (見込)'}</span><span class="amount-big">${fmtYen(s.payment_amount)}</span></div>
+        ${finalized?`<div class="muted" style="margin-top:6px;">確定 ${finalized}</div>`:''}
+        <button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
+        <div class="detail-body" style="display:none;">${renderDeliveryDetail(s.daily_rows||[])}</div>
+      </div>`;
+    }).join('');
+  }
+  return `<div class="card">
+    <div class="card-header"><span class="badge badge-delivery">デリバリー</span>
+    </div>
+    ${body}
+  </div>`;
+}
+
+function renderDeliveryDetail(rows){
+  if(!rows.length)return '<div class="empty">日別データなし</div>';
+  const dow=['日','月','火','水','木','金','土'];
+  return `<table class="detail">
+    <thead><tr><th>日付</th><th>曜日</th><th>配達</th><th>集荷</th><th>個口</th><th>売上</th><th>手当</th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const d=new Date(r.date);
+      const dn=d.getDay();
+      const cls=dn===0?'sun':(dn===6?'sat':'');
+      return `<tr class="${cls}">
+        <td>${escHtml(r.date||'')}</td>
+        <td class="center">${dow[dn]||''}</td>
+        <td class="right">${r.delivery_count||''}</td>
+        <td class="right">${r.pickup_count||''}</td>
+        <td class="right">${r.package_count||''}</td>
+        <td class="right">${r.revenue?fmtYen(r.revenue):''}</td>
+        <td class="right">${r.allowance?fmtYen(r.allowance):''}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+window.toggleDetail=function(btn){
+  const body=btn.nextElementSibling;
+  if(body.style.display==='none'){body.style.display='block';btn.textContent='📅 日別を閉じる';}
+  else{body.style.display='none';btn.textContent='📅 日別を見る';}
+};
+
+// 起動: 既存セッション復帰
+(async function init(){
+  const {data}=await sb.auth.getSession();
+  if(data.session){
+    session=data.session;
+    await postLogin();
+  }
+})();
+
+// Enter キーでログイン
+$('login-pw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+$('login-email').addEventListener('keydown',e=>{if(e.key==='Enter')$('login-pw').focus();});
+</script>
+</body>
+</html>
