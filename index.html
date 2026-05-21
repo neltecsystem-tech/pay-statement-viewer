@@ -117,6 +117,8 @@ table.detail tr.sat{background:#fef3c7;}
         <label>対象月:</label>
         <input type="month" id="ym-input" class="input">
         <button class="btn" onclick="loadAll()">読み込み</button>
+        <button class="btn btn-pdf" id="btn-summary-pdf" onclick="downloadSummaryPdf()" disabled style="background:#0ea5e9;">📄 サマリーPDF</button>
+        <button class="btn-ghost" id="btn-all-pdf" onclick="downloadAllPdf()" disabled>📦 全部一括PDF</button>
         <span id="admin-toggle-wrap" style="display:none;margin-left:auto;">
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
             <input type="checkbox" id="admin-mode-cb" onchange="toggleAdminMode()"> 管理者: 任意電話検索
@@ -126,11 +128,14 @@ table.detail tr.sat{background:#fef3c7;}
 
       <div id="admin-phone-bar" style="display:none;margin-bottom:14px;">
         <div class="card" style="background:#fef3c7;border-color:#f59e0b;">
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
             <span style="font-weight:600;font-size:13px;">🔍 他人の明細検索:</span>
-            <input type="tel" id="admin-phone-input" class="input" placeholder="例 090-1234-5678" style="flex:1;min-width:180px;">
-            <button class="btn" onclick="loadByPhone()">検索</button>
+            <input type="text" id="admin-name-input" class="input" placeholder="名前で検索 (例: 小林)" style="flex:1;min-width:160px;">
+            <span style="font-size:12px;color:#92400e;">または</span>
+            <input type="tel" id="admin-phone-input" class="input" placeholder="電話番号 (例 090-1234-5678)" style="flex:1;min-width:180px;">
+            <button class="btn" onclick="adminSearch()">検索</button>
           </div>
+          <div id="admin-name-results" style="display:none;margin-top:6px;background:#fff;border-radius:6px;border:1px solid var(--border);max-height:240px;overflow-y:auto;"></div>
         </div>
       </div>
 
@@ -139,7 +144,12 @@ table.detail tr.sat{background:#fef3c7;}
   </div>
 </div>
 
+<!-- PDF生成用 オフスクリーン領域 -->
+<div id="pdf-stage" aria-hidden="true" style="position:absolute;left:-99999px;top:0;width:760px;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans',sans-serif;color:#0f172a;"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
 'use strict';
 
@@ -154,7 +164,9 @@ const SHIFT_URL=SUPABASE_URL+'/functions/v1/pay-statement-by-phone';
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON);
 
 let session=null;
-let profile=null;// {id, display_name, role, phone}
+let profile=null;// ログイン中のユーザー
+let targetProfile=null;// 現在表示中のドライバー (自分 or 検索した他人)
+let currentData=null;// {shift, askul, delivery, ym, phone}
 
 function $(id){return document.getElementById(id);}
 
@@ -186,7 +198,7 @@ async function doLogin(){
 
 async function postLogin(){
   // profile を取得
-  const {data,error}=await sb.from('profiles').select('id, display_name, role, phone').eq('id',session.user.id).maybeSingle();
+  const {data,error}=await sb.from('profiles').select('id, display_name, role, phone, is_company_owner').eq('id',session.user.id).maybeSingle();
   if(error||!data){
     alert('プロファイルが見つかりません: '+(error?.message||'unknown'));
     return doLogout();
@@ -257,11 +269,13 @@ async function changePhone(){
 
 async function doLogout(){
   await sb.auth.signOut();
-  session=null;profile=null;
+  session=null;profile=null;targetProfile=null;currentData=null;
   $('screen-main').style.display='none';
   $('screen-login').style.display='block';
   $('login-email').value='';$('login-pw').value='';
   $('result-area').innerHTML='';
+  $('btn-summary-pdf').disabled=true;
+  $('btn-all-pdf').disabled=true;
 }
 
 function toggleAdminMode(){
@@ -282,11 +296,83 @@ function loadByPhone(){
   loadFor(phone);
 }
 
+async function adminSearch(){
+  const name=$('admin-name-input').value.trim();
+  const phoneRaw=$('admin-phone-input').value.trim();
+  if(phoneRaw){
+    const phone=normalizePhone(phoneRaw);
+    if(phone.length>=10){loadFor(phone);return;}
+  }
+  if(!name){alert('名前または電話番号を入力してください');return;}
+  await searchByName(name);
+}
+
+async function searchByName(query){
+  const results=$('admin-name-results');
+  results.style.display='block';
+  results.innerHTML='<div style="padding:10px;color:var(--text-sub);font-size:12px;"><span class="spinner"></span> 検索中...</div>';
+  const {data,error}=await sb.from('profiles').select('id, display_name, phone, role, company, position, is_company_owner').ilike('display_name','%'+query+'%').not('phone','is',null).limit(30);
+  if(error){results.innerHTML=`<div style="padding:10px;color:var(--danger);font-size:12px;">検索エラー: ${escHtml(error.message)}</div>`;return;}
+  if(!data||!data.length){
+    results.innerHTML=`<div style="padding:10px;color:var(--text-sub);font-size:12px;">該当者なし (電話番号未登録の人は出ません)</div>`;
+    return;
+  }
+  const canEditOwner=profile?.role==='super_admin';
+  results.innerHTML=data.map(p=>{
+    const sub=[p.company,p.position].filter(Boolean).join(' / ');
+    const adminTag=(p.role==='admin'||p.role==='super_admin')?'<span style="background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">管理者</span>':'';
+    const ownerTag=p.is_company_owner?'<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">👑 オーナー</span>':'';
+    const ownerToggle=canEditOwner?`<button onclick="event.stopPropagation();toggleOwner('${escHtml(p.id)}',${!p.is_company_owner})" style="background:transparent;border:1px dashed var(--border);padding:3px 7px;border-radius:6px;font-size:10px;cursor:pointer;color:var(--text-sub);">${p.is_company_owner?'オーナー解除':'オーナー設定'}</button>`:'';
+    return `<div onclick="pickName('${escHtml(p.phone)}','${escHtml(p.display_name||'')}')" style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
+      <div>
+        <div style="font-weight:600;font-size:13px;">${escHtml(p.display_name||'(名前未設定)')}${adminTag}${ownerTag}</div>
+        ${sub?`<div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${escHtml(sub)}</div>`:''}
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+        <div style="font-size:11px;color:var(--text-sub);font-family:monospace;">${escHtml(p.phone)}</div>
+        ${ownerToggle}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+window.toggleOwner=async function(profileId,newValue){
+  if(!confirm(newValue?'この人を法人オーナーに設定しますか?\n→ 自分の支払明細を見られるようになります':'オーナー設定を解除しますか?\n→ 法人ドライバー扱いになり、自分の金額は見られなくなります'))return;
+  const {error}=await sb.from('profiles').update({is_company_owner:newValue}).eq('id',profileId);
+  if(error){alert('更新失敗: '+error.message);return;}
+  // 直近の検索を再実行して反映
+  if($('admin-name-input').value.trim())await searchByName($('admin-name-input').value.trim());
+  // 現在表示中の人なら targetProfile も更新
+  if(targetProfile?.id===profileId){
+    targetProfile.is_company_owner=newValue;
+    if(currentData)renderResults(currentData);
+  }
+};
+
+window.pickName=function(phone,name){
+  $('admin-phone-input').value=phone;
+  $('admin-name-input').value=name;
+  $('admin-name-results').style.display='none';
+  loadFor(normalizePhone(phone));
+};
+
+async function loadTargetProfile(phone){
+  // ログイン中ユーザー自身ならその profile を流用
+  if(profile?.phone && normalizePhone(profile.phone)===phone){
+    targetProfile=profile;
+    return;
+  }
+  // 電話番号で NexPort profiles を逆引き (オーナー判定用)
+  const {data}=await sb.from('profiles').select('id, display_name, phone, role, is_company_owner').not('phone','is',null);
+  targetProfile=(data||[]).find(p=>normalizePhone(p.phone||'')===phone)||null;
+}
+
 async function loadFor(phone){
   const ym=$('ym-input').value;
   if(!ym){alert('対象月を選択してください');return;}
   const area=$('result-area');
   area.innerHTML='<div class="card center"><div class="spinner"></div> 3ツールに問い合わせ中...</div>';
+  await loadTargetProfile(phone);
 
   const callEf=async (url,anon)=>{
     try{
@@ -310,11 +396,12 @@ async function loadFor(phone){
 }
 
 function renderResults({shift,askul,delivery,ym,phone}){
+  currentData={shift,askul,delivery,ym,phone};
   const area=$('result-area');
-  const total=(shift?.statements||[]).reduce((s,r)=>s+(r.grand_total||0),0)
-            +(askul?.statements||[]).reduce((s,r)=>s+(r.payment_amount||0),0)
-            +(delivery?.statements||[]).reduce((s,r)=>s+(r.payment_amount||0),0);
+  const total=calcTotal({shift,askul,delivery});
   const foundCount=[shift,askul,delivery].filter(r=>r&&r.found).length;
+  $('btn-summary-pdf').disabled=foundCount===0;
+  $('btn-all-pdf').disabled=foundCount===0;
 
   let html='';
   if(foundCount>0){
@@ -339,6 +426,10 @@ function renderResults({shift,askul,delivery,ym,phone}){
   area.innerHTML=html;
 }
 
+function pdfBtn(source,disabled){
+  return `<button class="btn-ghost" style="margin-left:auto;font-size:11px;padding:4px 8px;" ${disabled?'disabled':''} onclick="downloadToolPdf('${source}')">📄 PDF</button>`;
+}
+
 function renderShiftCard(r,ym){
   let body='';
   if(r?.error){
@@ -349,20 +440,24 @@ function renderShiftCard(r,ym){
     body=(r.statements||[]).map(s=>{
       const finalized=s.finalized_at?new Date(s.finalized_at).toLocaleString('ja-JP'):'';
       const modified=s.modified_at?` / 修正 ${new Date(s.modified_at).toLocaleString('ja-JP')}`:'';
+      const hide=shouldHide(s,'shift');
       return `<div style="border-top:1px dashed var(--border);padding-top:10px;margin-top:10px;">
         <div class="summary-row"><span class="summary-label">スタッフ</span><span class="summary-value">${escHtml(s.staff_name)}${s.primary_area?` (${escHtml(s.primary_area)})`:''}</span></div>
+        ${hide?hideMsg():`
         <div class="summary-row"><span class="summary-label">朝刊合計</span><span class="summary-value">${fmtYen(s.am_sum)}</span></div>
         <div class="summary-row"><span class="summary-label">夕刊合計</span><span class="summary-value">${fmtYen(s.pm_sum)}</span></div>
         <div class="amount-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:8px;"><span class="label">月合計</span><span class="amount-big">${fmtYen(s.grand_total)}</span></div>
+        `}
         <div class="muted" style="margin-top:6px;">確定 ${finalized}${modified}</div>
-        <button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
-        <div class="detail-body" style="display:none;">${renderShiftDetail(s.rows||[])}</div>
+        ${hide?'':`<button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
+        <div class="detail-body" style="display:none;">${renderShiftDetail(s.rows||[])}</div>`}
       </div>`;
     }).join('');
   }
   return `<div class="card">
     <div class="card-header"><span class="badge badge-shift">新聞シフト</span>
       <span class="status-pill ${r?.found?'status-final':'status-none'}">${r?.found?'確定済':'未公開'}</span>
+      ${pdfBtn('shift',!r?.found)}
     </div>
     ${body}
   </div>`;
@@ -397,16 +492,16 @@ function renderAskulCard(r,ym){
     body=(r.statements||[]).map(s=>{
       const finalized=s.finalized_at?new Date(s.finalized_at).toLocaleString('ja-JP'):'';
       const modified=s.modified_at?` / 修正 ${new Date(s.modified_at).toLocaleString('ja-JP')}`:'';
-      const hideAmount=s.business_type==='corporation'||s.business_type==='employee';
+      const hide=shouldHide(s,'askul');
       return `<div style="border-top:1px dashed var(--border);padding-top:10px;margin-top:10px;">
         <div class="summary-row"><span class="summary-label">ドライバー</span><span class="summary-value">${escHtml(s.driver_name)}${s.company_name?` (${escHtml(s.company_name)})`:''}</span></div>
-        ${hideAmount?'<div class="muted">※法人/社員は金額非表示</div>':`
+        ${hide?hideMsg():`
         <div class="summary-row"><span class="summary-label">売上 (税抜)</span><span class="summary-value">${fmtYen(s.revenue)}</span></div>
         <div class="summary-row"><span class="summary-label">控除 (-${(s.deduction_rate||0)}%)</span><span class="summary-value" style="color:var(--warning);">-${fmtYen(s.deduction_amount)}</span></div>
         <div class="amount-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:8px;"><span class="label">支払額</span><span class="amount-big">${fmtYen(s.payment_amount)}</span></div>
         `}
         <div class="muted" style="margin-top:6px;">確定 ${finalized}${modified}</div>
-        ${hideAmount?'':`<button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
+        ${hide?'':`<button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
         <div class="detail-body" style="display:none;">${renderAskulDetail(s.daily_rows||[])}</div>`}
       </div>`;
     }).join('');
@@ -414,6 +509,7 @@ function renderAskulCard(r,ym){
   return `<div class="card">
     <div class="card-header"><span class="badge badge-askul">アスクル</span>
       <span class="status-pill ${r?.found?'status-final':'status-none'}">${r?.found?'確定済':'未公開'}</span>
+      ${pdfBtn('askul',!r?.found)}
     </div>
     ${body}
   </div>`;
@@ -450,20 +546,24 @@ function renderDeliveryCard(r,ym){
     body=(r.statements||[]).map(s=>{
       const status=s.finalized?`<span class="status-pill status-final">確定</span>`:`<span class="status-pill status-draft">未確定 (集計値)</span>`;
       const finalized=s.finalized_at?new Date(s.finalized_at).toLocaleString('ja-JP'):'';
+      const hide=shouldHide(s,'delivery');
       return `<div style="border-top:1px dashed var(--border);padding-top:10px;margin-top:10px;">
         <div class="summary-row"><span class="summary-label">ドライバー</span><span class="summary-value">${escHtml(s.driver_name)} ${status}</span></div>
+        ${hide?hideMsg():`
         <div class="summary-row"><span class="summary-label">売上</span><span class="summary-value">${fmtYen(s.revenue)}</span></div>
         ${s.allowance_total?`<div class="summary-row"><span class="summary-label">追加支給</span><span class="summary-value">${fmtYen(s.allowance_total)}</span></div>`:''}
         ${s.deduction_amount?`<div class="summary-row"><span class="summary-label">控除</span><span class="summary-value" style="color:var(--warning);">-${fmtYen(s.deduction_amount)}</span></div>`:''}
         <div class="amount-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:8px;"><span class="label">${s.finalized?'支払額 (確定)':'支払額 (見込)'}</span><span class="amount-big">${fmtYen(s.payment_amount)}</span></div>
+        `}
         ${finalized?`<div class="muted" style="margin-top:6px;">確定 ${finalized}</div>`:''}
-        <button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
-        <div class="detail-body" style="display:none;">${renderDeliveryDetail(s.daily_rows||[])}</div>
+        ${hide?'':`<button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
+        <div class="detail-body" style="display:none;">${renderDeliveryDetail(s.daily_rows||[])}</div>`}
       </div>`;
     }).join('');
   }
   return `<div class="card">
     <div class="card-header"><span class="badge badge-delivery">デリバリー</span>
+      ${pdfBtn('delivery',!r?.found)}
     </div>
     ${body}
   </div>`;
@@ -497,6 +597,347 @@ window.toggleDetail=function(btn){
   else{body.style.display='none';btn.textContent='📅 日別を見る';}
 };
 
+// ===== PDF 生成 =====
+
+function calcTotal({shift,askul,delivery}){
+  return (shift?.statements||[]).reduce((s,r)=>s+(shouldHide(r,'shift')?0:(r.grand_total||0)),0)
+        +(askul?.statements||[]).reduce((s,r)=>s+(shouldHide(r,'askul')?0:(r.payment_amount||0)),0)
+        +(delivery?.statements||[]).reduce((s,r)=>s+(shouldHide(r,'delivery')?0:(r.payment_amount||0)),0);
+}
+
+// 法人 (非オーナー) / 社員 は金額非表示。管理者 (admin/super_admin) は常に表示。
+// オーナーは NexPort profiles.is_company_owner で判定 (shift では biz_type='法人' でも見える)
+function shouldHide(stmt,source){
+  if(profile?.role==='admin'||profile?.role==='super_admin')return false;
+  const isOwner=targetProfile?.is_company_owner===true;
+  if(isOwner)return false;
+  if(source==='shift')return stmt.biz_type==='法人';
+  return stmt.business_type==='corporation'||stmt.business_type==='employee';
+}
+
+function hideMsg(){return '<div class="muted" style="padding:6px 10px;background:#f1f5f9;border-radius:6px;font-size:11px;">※ 法人所属 / 社員区分のため金額は非表示 (会社オーナーまたは管理者にお問い合わせください)</div>';}
+
+function ownerName(){
+  if(!currentData)return '';
+  const s=currentData.shift?.statements?.[0];
+  if(s?.staff_name)return s.staff_name;
+  const a=currentData.askul?.statements?.[0];
+  if(a?.driver_name)return a.driver_name;
+  const d=currentData.delivery?.statements?.[0];
+  if(d?.driver_name)return d.driver_name;
+  return profile?.display_name||'';
+}
+
+function safeFile(s){return String(s||'').replace(/[\\/:*?"<>|]/g,'_');}
+
+function eraLabel(y,m){
+  const reiwa=y-2018;
+  const era=reiwa>=1?`令和${reiwa===1?'元':reiwa}年`:`西暦${y}年`;
+  return `${era} ${m}月度`;
+}
+
+// オフスクリーンに DOM を描画 → html2canvas → jsPDF 化 → blob を返す
+async function renderToPdfBlob(html){
+  const stage=$('pdf-stage');
+  stage.innerHTML=html;
+  // 描画タイミング待ち
+  await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+  const target=stage.firstElementChild;
+  const canvas=await html2canvas(target,{scale:2,backgroundColor:'#ffffff',useCORS:true,logging:false});
+  const {jsPDF}=window.jspdf;
+  const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  const pdfWidth=pdf.internal.pageSize.getWidth();
+  const pdfHeight=pdf.internal.pageSize.getHeight();
+  const imgHeight=(canvas.height*pdfWidth)/canvas.width;
+  let heightLeft=imgHeight,position=0;
+  const data=canvas.toDataURL('image/jpeg',0.95);
+  pdf.addImage(data,'JPEG',0,position,pdfWidth,imgHeight);
+  heightLeft-=pdfHeight;
+  while(heightLeft>0){
+    position=heightLeft-imgHeight;
+    pdf.addPage();
+    pdf.addImage(data,'JPEG',0,position,pdfWidth,imgHeight);
+    heightLeft-=pdfHeight;
+  }
+  stage.innerHTML='';
+  return pdf;
+}
+
+// ----- サマリーPDF (1ページ全ツール集計) -----
+function buildSummaryHtml(){
+  if(!currentData)return '';
+  const {shift,askul,delivery,ym}=currentData;
+  const [y,m]=ym.split('-').map(Number);
+  const total=calcTotal(currentData);
+  const shiftTotal=(shift?.statements||[]).reduce((s,r)=>s+(shouldHide(r,'shift')?0:(r.grand_total||0)),0);
+  const askulTotal=(askul?.statements||[]).reduce((s,r)=>s+(shouldHide(r,'askul')?0:(r.payment_amount||0)),0);
+  const deliveryTotal=(delivery?.statements||[]).reduce((s,r)=>s+(shouldHide(r,'delivery')?0:(r.payment_amount||0)),0);
+  const shiftHidden=(shift?.statements||[]).some(r=>shouldHide(r,'shift'));
+  const askulHidden=(askul?.statements||[]).some(r=>shouldHide(r,'askul'));
+  const deliveryHidden=(delivery?.statements||[]).some(r=>shouldHide(r,'delivery'));
+  const row=(label,total,sub,color,hidden)=>`
+    <tr>
+      <td style="border:1px solid #94a3b8;padding:10px 14px;background:${color};color:#fff;font-weight:600;width:30%;">${escHtml(label)}</td>
+      <td style="border:1px solid #94a3b8;padding:10px 14px;font-size:11px;color:#475569;">${escHtml(sub||'—')}</td>
+      <td style="border:1px solid #94a3b8;padding:10px 14px;text-align:right;font-size:${hidden?12:18}px;font-weight:700;color:${hidden?'#94a3b8':'#0f172a'};">${hidden?'非表示':(total?fmtYen(total):'—')}</td>
+    </tr>`;
+  const shiftSub=(shift?.statements||[]).map(s=>`${s.staff_name}${s.primary_area?` (${s.primary_area})`:''}`).join(' / ');
+  const askulSub=(askul?.statements||[]).map(s=>`${s.driver_name}${s.company_name?` / ${s.company_name}`:''}`).join(' / ');
+  const deliverySub=(delivery?.statements||[]).map(s=>`${s.driver_name}${s.finalized?' (確定)':' (見込)'}`).join(' / ');
+  return `<div style="padding:32px;width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans',sans-serif;">
+    <div style="text-align:center;border-bottom:3px solid #4f46e5;padding-bottom:14px;margin-bottom:24px;">
+      <div style="font-size:13px;color:#64748b;">統合支払明細書 サマリー</div>
+      <h1 style="margin:6px 0 0;font-size:24px;color:#4f46e5;">${escHtml(eraLabel(y,m))}</h1>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:24px;font-size:13px;">
+      <div><div style="color:#64748b;font-size:11px;">対象者</div><div style="font-size:16px;font-weight:600;margin-top:2px;">${escHtml(ownerName())}</div></div>
+      <div style="text-align:right;"><div style="color:#64748b;font-size:11px;">発行日</div><div style="font-size:13px;margin-top:2px;">${new Date().toLocaleDateString('ja-JP')}</div></div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:24px;">
+      <thead><tr style="background:#f1f5f9;">
+        <th style="border:1px solid #94a3b8;padding:8px;text-align:left;width:30%;">ツール</th>
+        <th style="border:1px solid #94a3b8;padding:8px;text-align:left;">内訳</th>
+        <th style="border:1px solid #94a3b8;padding:8px;text-align:right;">支払額</th>
+      </tr></thead>
+      <tbody>
+        ${row('📰 新聞シフト',shiftTotal,shiftSub,'#0ea5e9',shiftHidden)}
+        ${row('📦 アスクル',askulTotal,askulSub,'#f97316',askulHidden)}
+        ${row('🚚 デリバリー',deliveryTotal,deliverySub,'#10b981',deliveryHidden)}
+      </tbody>
+    </table>
+    <div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid #f59e0b;border-radius:10px;padding:20px;text-align:center;margin-bottom:14px;">
+      <div style="font-size:12px;color:#92400e;font-weight:600;">${escHtml(eraLabel(y,m))} 総支払額</div>
+      <div style="font-size:36px;font-weight:700;color:#92400e;margin-top:6px;">${fmtYen(total)}</div>
+    </div>
+    <div style="color:#94a3b8;font-size:10px;text-align:right;margin-top:24px;">📑 統合支払明細ビューア / Neltec System</div>
+  </div>`;
+}
+
+// ----- 新聞シフト 詳細PDF -----
+function buildShiftDetailHtml(){
+  if(!currentData?.shift?.found)return '';
+  const {shift,ym}=currentData;
+  const [y,m]=ym.split('-').map(Number);
+  const s=shift.statements[0];
+  if(!s)return '';
+  if(shouldHide(s,'shift')){
+    return `<div style="padding:32px;width:760px;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans',sans-serif;text-align:center;color:#64748b;">
+      <h2 style="color:#0ea5e9;">📰 新聞シフト</h2>
+      <div style="padding:40px;background:#f8fafc;border-radius:8px;margin-top:20px;">法人/社員区分のため金額は非表示</div>
+    </div>`;
+  }
+  let h=`<div style="padding:32px;width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans',sans-serif;">`;
+  h+=`<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0ea5e9;padding-bottom:10px;margin-bottom:16px;">
+    <div><div style="font-size:11px;color:#64748b;">📰 新聞シフト 別紙明細書</div>
+    <h2 style="margin:4px 0 0;font-size:20px;color:#0ea5e9;">${escHtml(eraLabel(y,m))}</h2></div>
+    <div style="text-align:right;font-size:15px;font-weight:600;">${escHtml(s.staff_name)}${s.primary_area?`<div style="font-size:11px;color:#64748b;margin-top:2px;">主稼働: ${escHtml(s.primary_area)}</div>`:''}</div>
+  </div>`;
+  h+=`<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:16px;">
+    <thead><tr style="background:#f1f5f9;">
+      <th style="border:1px solid #94a3b8;padding:5px;">日付</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">曜日</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">朝刊コース</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">朝刊</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">夕刊コース</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">夕刊</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">計</th>
+    </tr></thead><tbody>`;
+  (s.rows||[]).forEach(r=>{
+    const bg=r.dow==='日'?'#fee2e2':(r.dow==='土'?'#fef3c7':'');
+    h+=`<tr${bg?` style="background:${bg};"`:''}>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;">${escHtml(r.d||r.ymd||'')}</td>
+      <td style="border:1px solid #94a3b8;padding:3px;text-align:center;">${escHtml(r.dow||'')}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;">${escHtml(r.am_course||'')}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.am?fmtYen(r.am):''}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;">${escHtml(r.pm_course||'')}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.pm?fmtYen(r.pm):''}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;font-weight:600;">${fmtYen(r.total||0)}</td>
+    </tr>`;
+  });
+  h+=`<tr style="background:#f1f5f9;font-weight:700;">
+    <td colspan="3" style="border:1px solid #94a3b8;padding:5px;text-align:center;">合計</td>
+    <td style="border:1px solid #94a3b8;padding:5px;text-align:right;">${fmtYen(s.am_sum||0)}</td>
+    <td style="border:1px solid #94a3b8;padding:5px;"></td>
+    <td style="border:1px solid #94a3b8;padding:5px;text-align:right;">${fmtYen(s.pm_sum||0)}</td>
+    <td style="border:1px solid #94a3b8;padding:5px;text-align:right;background:#fef3c7;color:#92400e;">${fmtYen(s.grand_total||0)}</td>
+  </tr></tbody></table>`;
+  if(s.finalized_at)h+=`<div style="font-size:10px;color:#94a3b8;text-align:right;">確定 ${new Date(s.finalized_at).toLocaleString('ja-JP')}${s.modified_at?` / 修正 ${new Date(s.modified_at).toLocaleString('ja-JP')}`:''}</div>`;
+  h+='</div>';
+  return h;
+}
+
+// ----- アスクル 詳細PDF -----
+function buildAskulDetailHtml(){
+  if(!currentData?.askul?.found)return '';
+  const {askul,ym}=currentData;
+  const [y,m]=ym.split('-').map(Number);
+  const s=askul.statements[0];
+  if(!s)return '';
+  const hideAmount=shouldHide(s,'askul');
+  const dow=['日','月','火','水','木','金','土'];
+  let h=`<div style="padding:32px;width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans',sans-serif;">`;
+  h+=`<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #f97316;padding-bottom:10px;margin-bottom:16px;">
+    <div><div style="font-size:11px;color:#64748b;">📦 アスクル 支払明細書</div>
+    <h2 style="margin:4px 0 0;font-size:20px;color:#f97316;">${escHtml(eraLabel(y,m))}</h2></div>
+    <div style="text-align:right;font-size:15px;font-weight:600;">${escHtml(s.driver_name)}${s.company_name?`<div style="font-size:11px;color:#64748b;margin-top:2px;">${escHtml(s.company_name)}</div>`:''}</div>
+  </div>`;
+  if(hideAmount){
+    h+=`<div style="text-align:center;padding:40px;color:#64748b;background:#f8fafc;border-radius:8px;">法人/社員区分のため金額は非表示</div>`;
+  }else{
+    h+=`<div style="display:flex;gap:10px;margin-bottom:16px;">
+      <div style="flex:1;background:#fff7ed;border-radius:8px;padding:12px;text-align:center;"><div style="font-size:11px;color:#9a3412;">売上 (税抜)</div><div style="font-size:16px;font-weight:700;color:#9a3412;margin-top:4px;">${fmtYen(s.revenue||0)}</div></div>
+      <div style="flex:1;background:#fef2f2;border-radius:8px;padding:12px;text-align:center;"><div style="font-size:11px;color:#991b1b;">控除 (${s.deduction_rate||0}%)</div><div style="font-size:16px;font-weight:700;color:#991b1b;margin-top:4px;">-${fmtYen(s.deduction_amount||0)}</div></div>
+      <div style="flex:1;background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:12px;text-align:center;"><div style="font-size:11px;color:#92400e;">支払額</div><div style="font-size:18px;font-weight:700;color:#92400e;margin-top:4px;">${fmtYen(s.payment_amount||0)}</div></div>
+    </div>`;
+    h+=`<table style="width:100%;border-collapse:collapse;font-size:11px;">
+      <thead><tr style="background:#f1f5f9;">
+        <th style="border:1px solid #94a3b8;padding:5px;">日付</th>
+        <th style="border:1px solid #94a3b8;padding:5px;">曜日</th>
+        <th style="border:1px solid #94a3b8;padding:5px;">個建</th>
+        <th style="border:1px solid #94a3b8;padding:5px;">車建</th>
+        <th style="border:1px solid #94a3b8;padding:5px;">件数</th>
+        <th style="border:1px solid #94a3b8;padding:5px;">小計</th>
+      </tr></thead><tbody>`;
+    (s.daily_rows||[]).forEach(r=>{
+      const d=new Date(r.date);const dn=d.getDay();
+      const bg=dn===0?'#fee2e2':(dn===6?'#fef3c7':'');
+      h+=`<tr${bg?` style="background:${bg};"`:''}>
+        <td style="border:1px solid #94a3b8;padding:3px 6px;">${escHtml(r.date||'')}</td>
+        <td style="border:1px solid #94a3b8;padding:3px;text-align:center;">${dow[dn]||''}</td>
+        <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.kodate?fmtYen(r.kodate):''}</td>
+        <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.vehicle?fmtYen(r.vehicle):''}</td>
+        <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.count||''}</td>
+        <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;font-weight:600;">${fmtYen(r.subtotal||0)}</td>
+      </tr>`;
+    });
+    h+='</tbody></table>';
+  }
+  if(s.finalized_at)h+=`<div style="font-size:10px;color:#94a3b8;text-align:right;margin-top:10px;">確定 ${new Date(s.finalized_at).toLocaleString('ja-JP')}${s.modified_at?` / 修正 ${new Date(s.modified_at).toLocaleString('ja-JP')}`:''}</div>`;
+  h+='</div>';
+  return h;
+}
+
+// ----- デリバリー 詳細PDF -----
+function buildDeliveryDetailHtml(){
+  if(!currentData?.delivery?.found)return '';
+  const {delivery,ym}=currentData;
+  const [y,m]=ym.split('-').map(Number);
+  const s=delivery.statements[0];
+  if(!s)return '';
+  if(shouldHide(s,'delivery')){
+    return `<div style="padding:32px;width:760px;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans',sans-serif;text-align:center;color:#64748b;">
+      <h2 style="color:#10b981;">🚚 デリバリー</h2>
+      <div style="padding:40px;background:#f8fafc;border-radius:8px;margin-top:20px;">法人/社員区分のため金額は非表示</div>
+    </div>`;
+  }
+  const dow=['日','月','火','水','木','金','土'];
+  let h=`<div style="padding:32px;width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans',sans-serif;">`;
+  h+=`<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #10b981;padding-bottom:10px;margin-bottom:16px;">
+    <div><div style="font-size:11px;color:#64748b;">🚚 デリバリー 支払明細書 ${s.finalized?'<span style="background:#dcfce7;color:#166534;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:6px;">確定</span>':'<span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:6px;">未確定 (見込)</span>'}</div>
+    <h2 style="margin:4px 0 0;font-size:20px;color:#10b981;">${escHtml(eraLabel(y,m))}</h2></div>
+    <div style="text-align:right;font-size:15px;font-weight:600;">${escHtml(s.driver_name)}${s.company_name?`<div style="font-size:11px;color:#64748b;margin-top:2px;">${escHtml(s.company_name)}</div>`:''}</div>
+  </div>`;
+  h+=`<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+    <div style="flex:1;min-width:120px;background:#ecfdf5;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:10px;color:#065f46;">売上</div><div style="font-size:15px;font-weight:700;color:#065f46;margin-top:2px;">${fmtYen(s.revenue||0)}</div></div>
+    ${s.allowance_total?`<div style="flex:1;min-width:120px;background:#eff6ff;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:10px;color:#1e40af;">追加支給</div><div style="font-size:15px;font-weight:700;color:#1e40af;margin-top:2px;">${fmtYen(s.allowance_total)}</div></div>`:''}
+    ${s.deduction_amount?`<div style="flex:1;min-width:120px;background:#fef2f2;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:10px;color:#991b1b;">控除</div><div style="font-size:15px;font-weight:700;color:#991b1b;margin-top:2px;">-${fmtYen(s.deduction_amount)}</div></div>`:''}
+    <div style="flex:1;min-width:120px;background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:10px;color:#92400e;">${s.finalized?'支払額':'支払額 (見込)'}</div><div style="font-size:16px;font-weight:700;color:#92400e;margin-top:2px;">${fmtYen(s.payment_amount||0)}</div></div>
+  </div>`;
+  h+=`<table style="width:100%;border-collapse:collapse;font-size:11px;">
+    <thead><tr style="background:#f1f5f9;">
+      <th style="border:1px solid #94a3b8;padding:5px;">日付</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">曜日</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">配達</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">集荷</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">個口</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">売上</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">手当</th>
+    </tr></thead><tbody>`;
+  (s.daily_rows||[]).forEach(r=>{
+    const d=new Date(r.date);const dn=d.getDay();
+    const bg=dn===0?'#fee2e2':(dn===6?'#fef3c7':'');
+    h+=`<tr${bg?` style="background:${bg};"`:''}>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;">${escHtml(r.date||'')}</td>
+      <td style="border:1px solid #94a3b8;padding:3px;text-align:center;">${dow[dn]||''}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.delivery_count||''}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.pickup_count||''}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.package_count||''}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.revenue?fmtYen(r.revenue):''}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.allowance?fmtYen(r.allowance):''}</td>
+    </tr>`;
+  });
+  h+='</tbody></table>';
+  if(s.finalized_at)h+=`<div style="font-size:10px;color:#94a3b8;text-align:right;margin-top:10px;">確定 ${new Date(s.finalized_at).toLocaleString('ja-JP')}</div>`;
+  h+='</div>';
+  return h;
+}
+
+async function downloadSummaryPdf(){
+  if(!currentData)return;
+  const btn=$('btn-summary-pdf');
+  btn.disabled=true;const old=btn.textContent;btn.textContent='⏳ 生成中...';
+  try{
+    const pdf=await renderToPdfBlob(buildSummaryHtml());
+    const fname=safeFile(`${currentData.ym}_サマリー_${ownerName()}.pdf`);
+    pdf.save(fname);
+  }catch(e){alert('PDF生成失敗: '+e.message);}
+  btn.textContent=old;btn.disabled=false;
+}
+
+async function downloadToolPdf(source){
+  if(!currentData)return;
+  const builder={shift:buildShiftDetailHtml,askul:buildAskulDetailHtml,delivery:buildDeliveryDetailHtml}[source];
+  if(!builder){alert('未対応');return;}
+  const html=builder();
+  if(!html){alert('データがありません');return;}
+  try{
+    const pdf=await renderToPdfBlob(html);
+    const label={shift:'新聞',askul:'アスクル',delivery:'デリバリー'}[source];
+    const fname=safeFile(`${currentData.ym}_${label}_${ownerName()}.pdf`);
+    pdf.save(fname);
+  }catch(e){alert('PDF生成失敗: '+e.message);}
+}
+
+async function downloadAllPdf(){
+  if(!currentData)return;
+  const btn=$('btn-all-pdf');
+  btn.disabled=true;const old=btn.textContent;btn.textContent='⏳ 生成中...';
+  try{
+    // 1つの PDF にサマリー + 各ツール詳細を結合
+    const sections=[buildSummaryHtml()];
+    if(currentData.shift?.found)sections.push(buildShiftDetailHtml());
+    if(currentData.askul?.found)sections.push(buildAskulDetailHtml());
+    if(currentData.delivery?.found)sections.push(buildDeliveryDetailHtml());
+    const {jsPDF}=window.jspdf;
+    const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const pdfWidth=pdf.internal.pageSize.getWidth();
+    const pdfHeight=pdf.internal.pageSize.getHeight();
+    const stage=$('pdf-stage');
+    for(let i=0;i<sections.length;i++){
+      stage.innerHTML=sections[i];
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+      const target=stage.firstElementChild;
+      const canvas=await html2canvas(target,{scale:2,backgroundColor:'#ffffff',useCORS:true,logging:false});
+      const imgHeight=(canvas.height*pdfWidth)/canvas.width;
+      let heightLeft=imgHeight,position=0;
+      if(i>0)pdf.addPage();
+      const data=canvas.toDataURL('image/jpeg',0.95);
+      pdf.addImage(data,'JPEG',0,position,pdfWidth,imgHeight);
+      heightLeft-=pdfHeight;
+      while(heightLeft>0){
+        position=heightLeft-imgHeight;
+        pdf.addPage();
+        pdf.addImage(data,'JPEG',0,position,pdfWidth,imgHeight);
+        heightLeft-=pdfHeight;
+      }
+    }
+    stage.innerHTML='';
+    const fname=safeFile(`${currentData.ym}_統合明細_${ownerName()}.pdf`);
+    pdf.save(fname);
+  }catch(e){alert('PDF生成失敗: '+e.message);}
+  btn.textContent=old;btn.disabled=false;
+}
+
 // 起動: 既存セッション復帰
 (async function init(){
   const {data}=await sb.auth.getSession();
@@ -509,6 +950,12 @@ window.toggleDetail=function(btn){
 // Enter キーでログイン
 $('login-pw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 $('login-email').addEventListener('keydown',e=>{if(e.key==='Enter')$('login-pw').focus();});
+
+// 管理者の名前/電話 input: Enter キーで検索
+['admin-name-input','admin-phone-input'].forEach(id=>{
+  const el=document.getElementById(id);
+  if(el)el.addEventListener('keydown',e=>{if(e.key==='Enter')adminSearch();});
+});
 </script>
 </body>
 </html>
