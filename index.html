@@ -165,6 +165,7 @@ table.detail tr.sat{background:#fef3c7;}
             <option value="members">一般メンバーのみ</option>
             <option value="owners">法人オーナーのみ</option>
             <option value="no_phone">電話未登録のみ</option>
+            <option value="no_site">現場未設定のみ</option>
           </select>
           <button class="btn" onclick="loadMembers()">🔄 再読み込み</button>
         </div>
@@ -197,6 +198,11 @@ table.detail tr.sat{background:#fef3c7;}
     <div style="margin-bottom:10px;">
       <label style="display:block;font-size:12px;color:var(--text-sub);margin-bottom:4px;">役職</label>
       <input type="text" id="mem-edit-position" class="input" style="width:100%;">
+    </div>
+    <div style="margin-bottom:10px;">
+      <label style="display:block;font-size:12px;color:var(--text-sub);margin-bottom:4px;">📍 配属現場</label>
+      <input type="text" id="mem-edit-site" class="input" style="width:100%;" placeholder="例: 立川 / ヤマト / アスクル など" list="site-suggestions">
+      <datalist id="site-suggestions"></datalist>
     </div>
     <div style="margin-bottom:14px;">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
@@ -1031,7 +1037,7 @@ async function loadMembers(){
   const listArea=$('admin-mbr-list-area');
   listArea.innerHTML='<div class="card center"><span class="spinner"></span> メンバー一覧読み込み中...</div>';
   $('admin-mbr-count').textContent='';
-  const {data,error}=await sb.from('profiles').select('id, display_name, phone, role, company, position, is_company_owner, account_status, created_at, employment_type').order('display_name');
+  const {data,error}=await sb.from('profiles').select('id, display_name, phone, role, company, position, site, is_company_owner, account_status, created_at, employment_type').order('display_name');
   if(error){
     listArea.innerHTML=`<div class="card" style="color:var(--danger);">読み込みエラー: ${escHtml(error.message)}</div>`;
     return;
@@ -1050,6 +1056,7 @@ function renderMemberList(){
   else if(filter==='members')list=list.filter(p=>p.role!=='admin'&&p.role!=='super_admin');
   else if(filter==='owners')list=list.filter(p=>!!p.is_company_owner);
   else if(filter==='no_phone')list=list.filter(p=>!p.phone);
+  else if(filter==='no_site')list=list.filter(p=>!p.site);
 
   if(search){
     const q=search;
@@ -1057,7 +1064,8 @@ function renderMemberList(){
       (p.display_name||'').toLowerCase().includes(q)||
       (p.phone||'').includes(q)||
       (p.company||'').toLowerCase().includes(q)||
-      (p.position||'').toLowerCase().includes(q)
+      (p.position||'').toLowerCase().includes(q)||
+      (p.site||'').toLowerCase().includes(q)
     );
   }
 
@@ -1074,11 +1082,17 @@ function renderMemberList(){
     const ownerTag=p.is_company_owner?'<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">👑 オーナー</span>':'';
     const pendingTag=p.account_status==='pending_approval'?'<span style="background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">承認待ち</span>':'';
     const sub=[p.company,p.position,p.employment_type].filter(Boolean).join(' / ');
+    const siteStr=p.site
+      ? `<span style="background:#dbeafe;color:#1e40af;padding:1px 8px;border-radius:8px;font-size:10px;font-weight:600;">📍 ${escHtml(p.site)}</span>`
+      : '<span style="background:#f1f5f9;color:#94a3b8;padding:1px 8px;border-radius:8px;font-size:10px;">📍 現場未設定</span>';
     const phoneStr=p.phone?escHtml(p.phone):'<span style="color:var(--danger);">未登録</span>';
     return `<div class="mbr-row" style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border);">
       <div style="flex:1;min-width:0;">
         <div style="font-weight:600;font-size:14px;">${escHtml(p.display_name||'(名前未設定)')}${adminTag}${ownerTag}${pendingTag}</div>
-        ${sub?`<div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${escHtml(sub)}</div>`:''}
+        <div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          ${siteStr}
+          ${sub?`<span style="font-size:11px;color:var(--text-sub);">${escHtml(sub)}</span>`:''}
+        </div>
       </div>
       <div style="font-size:12px;font-family:monospace;color:var(--text-sub);white-space:nowrap;">${phoneStr}</div>
       <button class="btn-ghost" onclick="openMemberEdit('${escHtml(p.id)}')">編集</button>
@@ -1096,7 +1110,11 @@ window.openMemberEdit=function(id){
   $('mem-edit-phone').value=p.phone||'';
   $('mem-edit-company').value=p.company||'';
   $('mem-edit-position').value=p.position||'';
+  $('mem-edit-site').value=p.site||'';
   $('mem-edit-owner').checked=!!p.is_company_owner;
+  // 既に登録済みの site 値を datalist のサジェストに反映
+  const uniqueSites=[...new Set(allMembers.map(m=>m.site).filter(Boolean))].sort();
+  $('site-suggestions').innerHTML=uniqueSites.map(s=>`<option value="${escHtml(s)}">`).join('');
   $('mem-edit-err').style.display='none';
   $('mem-edit-save-btn').dataset.id=id;
   $('member-edit-modal').style.display='flex';
@@ -1121,6 +1139,7 @@ window.saveMemberEdit=async function(){
     phone:phone||null,
     company:$('mem-edit-company').value.trim()||null,
     position:$('mem-edit-position').value.trim()||null,
+    site:$('mem-edit-site').value.trim()||null,
     is_company_owner:$('mem-edit-owner').checked,
   };
   btn.disabled=true;btn.textContent='保存中...';
