@@ -108,6 +108,7 @@ table.detail tr.sat{background:#fef3c7;}
           <div class="sub" id="hdr-user">読み込み中...</div>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-secondary" id="btn-open-admin" onclick="openAdminScreen()" title="メンバー管理" style="display:none;">👥 メンバー管理</button>
           <button class="btn btn-secondary" onclick="changePhone()" title="登録電話番号を変更">📱 電話変更</button>
           <button class="btn btn-secondary" onclick="doLogout()">ログアウト</button>
         </div>
@@ -140,6 +141,73 @@ table.detail tr.sat{background:#fef3c7;}
       </div>
 
       <div id="result-area"></div>
+    </div>
+
+    <!-- 管理者: メンバー管理画面 -->
+    <div id="screen-admin" style="display:none;">
+      <header>
+        <div>
+          <h1>👥 メンバー管理</h1>
+          <div class="sub" id="hdr-admin-user">読み込み中...</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-secondary" onclick="closeAdminScreen()">← 明細ビューアに戻る</button>
+          <button class="btn btn-secondary" onclick="doLogout()">ログアウト</button>
+        </div>
+      </header>
+
+      <div class="card" style="margin-bottom:12px;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+          <input type="text" id="admin-mbr-search" class="input" placeholder="名前/電話/会社で検索" style="flex:1;min-width:200px;">
+          <select id="admin-mbr-filter" class="input" onchange="renderMemberList()">
+            <option value="all">すべて</option>
+            <option value="admins">管理者のみ</option>
+            <option value="members">一般メンバーのみ</option>
+            <option value="owners">法人オーナーのみ</option>
+            <option value="no_phone">電話未登録のみ</option>
+          </select>
+          <button class="btn" onclick="loadMembers()">🔄 再読み込み</button>
+        </div>
+        <div style="font-size:12px;color:var(--text-sub);">
+          <span id="admin-mbr-count">読み込み中...</span>
+        </div>
+      </div>
+
+      <div id="admin-mbr-list-area"></div>
+    </div>
+  </div>
+</div>
+
+<!-- メンバー編集モーダル (管理者画面用) -->
+<div id="member-edit-modal" style="display:none;" class="modal-overlay">
+  <div class="modal" style="max-width:480px;">
+    <h3 id="mem-edit-title">メンバー編集</h3>
+    <div style="margin-bottom:10px;">
+      <label style="display:block;font-size:12px;color:var(--text-sub);margin-bottom:4px;">表示名</label>
+      <input type="text" id="mem-edit-name" class="input" style="width:100%;">
+    </div>
+    <div style="margin-bottom:10px;">
+      <label style="display:block;font-size:12px;color:var(--text-sub);margin-bottom:4px;">電話番号</label>
+      <input type="tel" id="mem-edit-phone" class="input" style="width:100%;" placeholder="例 090-1234-5678">
+    </div>
+    <div style="margin-bottom:10px;">
+      <label style="display:block;font-size:12px;color:var(--text-sub);margin-bottom:4px;">会社</label>
+      <input type="text" id="mem-edit-company" class="input" style="width:100%;">
+    </div>
+    <div style="margin-bottom:10px;">
+      <label style="display:block;font-size:12px;color:var(--text-sub);margin-bottom:4px;">役職</label>
+      <input type="text" id="mem-edit-position" class="input" style="width:100%;">
+    </div>
+    <div style="margin-bottom:14px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+        <input type="checkbox" id="mem-edit-owner">
+        <span>👑 法人オーナー (このフラグ ON で、 法人ドライバーでも自分の金額を見られる)</span>
+      </label>
+    </div>
+    <div id="mem-edit-err" style="color:var(--danger);font-size:12px;margin-bottom:10px;display:none;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn-ghost" onclick="closeMemberEdit()">キャンセル</button>
+      <button class="btn" id="mem-edit-save-btn" onclick="saveMemberEdit()">保存</button>
     </div>
   </div>
 </div>
@@ -208,7 +276,10 @@ async function postLogin(){
   $('screen-main').style.display='block';
   $('hdr-user').textContent=`${profile.display_name||session.user.email}${(profile.role==='admin'||profile.role==='super_admin')?' (管理者)':''}`;
   $('ym-input').value=thisMonth();
-  if(profile.role==='admin'||profile.role==='super_admin')$('admin-toggle-wrap').style.display='inline-flex';
+  if(profile.role==='admin'||profile.role==='super_admin'){
+    $('admin-toggle-wrap').style.display='inline-flex';
+    $('btn-open-admin').style.display='inline-flex';
+  }
 
   if(!profile.phone){
     await promptPhone();
@@ -938,6 +1009,131 @@ async function downloadAllPdf(){
   btn.textContent=old;btn.disabled=false;
 }
 
+// ───────────────────────────────────────────
+// 管理者: メンバー管理画面
+// ───────────────────────────────────────────
+let allMembers=[];// 全 profiles のキャッシュ (admin 画面用)
+
+function openAdminScreen(){
+  if(profile?.role!=='admin'&&profile?.role!=='super_admin'){alert('管理者権限が必要です');return;}
+  $('screen-main').style.display='none';
+  $('screen-admin').style.display='block';
+  $('hdr-admin-user').textContent=`${profile.display_name||session.user.email}${profile.role==='super_admin'?' (最高管理者)':' (管理者)'}`;
+  loadMembers();
+}
+
+function closeAdminScreen(){
+  $('screen-admin').style.display='none';
+  $('screen-main').style.display='block';
+}
+
+async function loadMembers(){
+  const listArea=$('admin-mbr-list-area');
+  listArea.innerHTML='<div class="card center"><span class="spinner"></span> メンバー一覧読み込み中...</div>';
+  $('admin-mbr-count').textContent='';
+  const {data,error}=await sb.from('profiles').select('id, display_name, phone, role, company, position, is_company_owner, account_status, created_at, employment_type').order('display_name');
+  if(error){
+    listArea.innerHTML=`<div class="card" style="color:var(--danger);">読み込みエラー: ${escHtml(error.message)}</div>`;
+    return;
+  }
+  allMembers=data||[];
+  renderMemberList();
+}
+
+function renderMemberList(){
+  const search=($('admin-mbr-search').value||'').trim().toLowerCase();
+  const filter=$('admin-mbr-filter').value;
+  const listArea=$('admin-mbr-list-area');
+
+  let list=allMembers.slice();
+  if(filter==='admins')list=list.filter(p=>p.role==='admin'||p.role==='super_admin');
+  else if(filter==='members')list=list.filter(p=>p.role!=='admin'&&p.role!=='super_admin');
+  else if(filter==='owners')list=list.filter(p=>!!p.is_company_owner);
+  else if(filter==='no_phone')list=list.filter(p=>!p.phone);
+
+  if(search){
+    const q=search;
+    list=list.filter(p=>
+      (p.display_name||'').toLowerCase().includes(q)||
+      (p.phone||'').includes(q)||
+      (p.company||'').toLowerCase().includes(q)||
+      (p.position||'').toLowerCase().includes(q)
+    );
+  }
+
+  $('admin-mbr-count').textContent=`${list.length}件 / 全${allMembers.length}件`;
+
+  if(list.length===0){
+    listArea.innerHTML='<div class="empty">該当するメンバーがいません</div>';
+    return;
+  }
+
+  const rows=list.map(p=>{
+    const adminTag=(p.role==='super_admin')?'<span style="background:#fde68a;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">最高管理者</span>'
+      :(p.role==='admin')?'<span style="background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">管理者</span>':'';
+    const ownerTag=p.is_company_owner?'<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">👑 オーナー</span>':'';
+    const pendingTag=p.account_status==='pending_approval'?'<span style="background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">承認待ち</span>':'';
+    const sub=[p.company,p.position,p.employment_type].filter(Boolean).join(' / ');
+    const phoneStr=p.phone?escHtml(p.phone):'<span style="color:var(--danger);">未登録</span>';
+    return `<div class="mbr-row" style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;font-size:14px;">${escHtml(p.display_name||'(名前未設定)')}${adminTag}${ownerTag}${pendingTag}</div>
+        ${sub?`<div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${escHtml(sub)}</div>`:''}
+      </div>
+      <div style="font-size:12px;font-family:monospace;color:var(--text-sub);white-space:nowrap;">${phoneStr}</div>
+      <button class="btn-ghost" onclick="openMemberEdit('${escHtml(p.id)}')">編集</button>
+    </div>`;
+  }).join('');
+
+  listArea.innerHTML=`<div class="card" style="padding:0;overflow:hidden;">${rows}</div>`;
+}
+
+window.openMemberEdit=function(id){
+  const p=allMembers.find(m=>m.id===id);
+  if(!p){alert('メンバーが見つかりません');return;}
+  $('mem-edit-title').textContent=`✏ ${p.display_name||'(無名)'} を編集`;
+  $('mem-edit-name').value=p.display_name||'';
+  $('mem-edit-phone').value=p.phone||'';
+  $('mem-edit-company').value=p.company||'';
+  $('mem-edit-position').value=p.position||'';
+  $('mem-edit-owner').checked=!!p.is_company_owner;
+  $('mem-edit-err').style.display='none';
+  $('mem-edit-save-btn').dataset.id=id;
+  $('member-edit-modal').style.display='flex';
+};
+
+window.closeMemberEdit=function(){
+  $('member-edit-modal').style.display='none';
+};
+
+window.saveMemberEdit=async function(){
+  const btn=$('mem-edit-save-btn');
+  const id=btn.dataset.id;
+  if(!id)return;
+  const err=$('mem-edit-err');
+  err.style.display='none';
+  const phone=normalizePhone($('mem-edit-phone').value);
+  if($('mem-edit-phone').value.trim()&&phone.length<10){
+    err.textContent='電話番号は10桁以上で入力してください (空欄も可)';err.style.display='block';return;
+  }
+  const updates={
+    display_name:$('mem-edit-name').value.trim()||null,
+    phone:phone||null,
+    company:$('mem-edit-company').value.trim()||null,
+    position:$('mem-edit-position').value.trim()||null,
+    is_company_owner:$('mem-edit-owner').checked,
+  };
+  btn.disabled=true;btn.textContent='保存中...';
+  const {error}=await sb.from('profiles').update(updates).eq('id',id);
+  btn.disabled=false;btn.textContent='保存';
+  if(error){err.textContent='保存失敗: '+error.message;err.style.display='block';return;}
+  // ローカルキャッシュ更新 + 再描画
+  const m=allMembers.find(x=>x.id===id);
+  if(m)Object.assign(m,updates);
+  closeMemberEdit();
+  renderMemberList();
+};
+
 // 起動: 既存セッション復帰
 (async function init(){
   const {data}=await sb.auth.getSession();
@@ -956,6 +1152,10 @@ $('login-email').addEventListener('keydown',e=>{if(e.key==='Enter')$('login-pw')
   const el=document.getElementById(id);
   if(el)el.addEventListener('keydown',e=>{if(e.key==='Enter')adminSearch();});
 });
+
+// メンバー管理: 検索ボックスは入力即時で絞り込み
+const mbrSearchEl=document.getElementById('admin-mbr-search');
+if(mbrSearchEl)mbrSearchEl.addEventListener('input',()=>renderMemberList());
 </script>
 </body>
 </html>
