@@ -211,6 +211,17 @@ table.detail tr.sat{background:#fef3c7;}
         <span>👑 法人オーナー (このフラグ ON で、 法人ドライバーでも自分の金額を見られる)</span>
       </label>
     </div>
+
+    <!-- 差引項目 (毎月適用される控除) -->
+    <div style="margin-bottom:14px;padding:12px;background:#fef9c3;border-radius:8px;border:1px solid #fde047;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-size:13px;font-weight:600;color:#854d0e;">💸 差引項目 (毎月自動で引かれる金額)</span>
+        <button type="button" class="btn-ghost" onclick="addDeductionRow()" style="font-size:11px;padding:3px 8px;">+ 追加</button>
+      </div>
+      <div id="mem-edit-deductions"></div>
+      <div style="font-size:11px;color:#92400e;margin-top:6px;">例: リース代 39000、 制服代 5000 など。 合計支払額から自動で差し引かれます。</div>
+    </div>
+
     <div id="mem-edit-err" style="color:var(--danger);font-size:12px;margin-bottom:10px;display:none;"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button class="btn-ghost" onclick="closeMemberEdit()">キャンセル</button>
@@ -464,28 +475,57 @@ async function loadFor(phone){
     }catch(e){return {error:e.message};}
   };
 
-  const [shift,askul,delivery]=await Promise.all([
+  // 差引項目を並列取得 (targetProfile.id で SELECT、 RLS で本人 or admin が見える)
+  const deductionsFetch=async()=>{
+    if(!targetProfile?.id)return [];
+    const {data}=await sb.from('member_deductions').select('id, label, amount, active').eq('profile_id',targetProfile.id).eq('active',true).order('sort_order').order('created_at');
+    return data||[];
+  };
+
+  const [shift,askul,delivery,deductions]=await Promise.all([
     callEf(SHIFT_URL,SUPABASE_ANON),
     callEf(ASKUL_URL,ASKUL_ANON),
     callEf(DELIVERY_URL,DELIVERY_ANON),
+    deductionsFetch(),
   ]);
 
-  renderResults({shift,askul,delivery,ym,phone});
+  renderResults({shift,askul,delivery,deductions,ym,phone});
 }
 
-function renderResults({shift,askul,delivery,ym,phone}){
-  currentData={shift,askul,delivery,ym,phone};
+function renderResults({shift,askul,delivery,deductions,ym,phone}){
+  currentData={shift,askul,delivery,deductions:deductions||[],ym,phone};
   const area=$('result-area');
-  const total=calcTotal({shift,askul,delivery});
+  const toolTotal=calcTotal({shift,askul,delivery});
   const foundCount=[shift,askul,delivery].filter(r=>r&&r.found).length;
+  const deds=(deductions||[]).filter(d=>d.active);
+  const deductionTotal=deds.reduce((s,d)=>s+(Number(d.amount)||0),0);
+  const grandTotal=toolTotal-deductionTotal;
   $('btn-summary-pdf').disabled=foundCount===0;
   $('btn-all-pdf').disabled=foundCount===0;
 
   let html='';
   if(foundCount>0){
-    html+=`<div class="grand-total-card">
-      <div class="label">${escHtml(ym)} 合計支払額 (${foundCount}ツール)</div>
-      <div class="value">${fmtYen(total)}</div>
+    if(deductionTotal>0){
+      html+=`<div class="grand-total-card">
+        <div class="label">${escHtml(ym)} 差引後 合計支払額 (${foundCount}ツール)</div>
+        <div class="value">${fmtYen(grandTotal)}</div>
+        <div style="font-size:11px;color:#92400e;margin-top:6px;">ツール合計 ${fmtYen(toolTotal)} − 差引 ${fmtYen(deductionTotal)}</div>
+      </div>`;
+    }else{
+      html+=`<div class="grand-total-card">
+        <div class="label">${escHtml(ym)} 合計支払額 (${foundCount}ツール)</div>
+        <div class="value">${fmtYen(toolTotal)}</div>
+      </div>`;
+    }
+  }
+
+  // 差引項目カード (active なものが 1 件以上ある場合のみ表示)
+  if(deds.length>0){
+    html+=`<div class="card" style="border-color:#fbbf24;background:#fffbeb;">
+      <div class="card-header"><span style="font-weight:700;color:#92400e;">💸 差引項目</span></div>
+      ${deds.map(d=>`<div class="amount-row"><span class="label">${escHtml(d.label)}</span><span class="value" style="color:#dc2626;">−${fmtYen(d.amount)}</span></div>`).join('')}
+      <div class="divider"></div>
+      <div class="amount-row"><span class="label" style="font-weight:600;">差引合計</span><span class="value" style="color:#dc2626;font-weight:700;">−${fmtYen(deductionTotal)}</span></div>
     </div>`;
   }
 
@@ -1103,7 +1143,7 @@ function renderMemberList(){
   listArea.innerHTML=`<div class="card" style="padding:0;overflow:hidden;">${rows}</div>`;
 }
 
-window.openMemberEdit=function(id){
+window.openMemberEdit=async function(id){
   const p=allMembers.find(m=>m.id===id);
   if(!p){alert('メンバーが見つかりません');return;}
   $('mem-edit-title').textContent=`✏ ${p.display_name||'(無名)'} を編集`;
@@ -1119,6 +1159,28 @@ window.openMemberEdit=function(id){
   $('mem-edit-err').style.display='none';
   $('mem-edit-save-btn').dataset.id=id;
   $('member-edit-modal').style.display='flex';
+  // 差引項目を取得して表示
+  $('mem-edit-deductions').innerHTML='<div style="color:var(--text-sub);font-size:11px;padding:4px 0;">読み込み中...</div>';
+  const {data:deds}=await sb.from('member_deductions').select('id, label, amount, active').eq('profile_id',id).order('sort_order').order('created_at');
+  $('mem-edit-deductions').innerHTML='';
+  (deds||[]).forEach(d=>addDeductionRow(d));
+};
+
+window.addDeductionRow=function(item){
+  const row=document.createElement('div');
+  row.className='dedu-row';
+  row.dataset.id=item?.id||'';
+  row.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:6px;';
+  row.innerHTML=`
+    <input type="text" class="input dedu-label" placeholder="項目名 (例: リース代)" value="${escHtml(item?.label||'')}" style="flex:1.4;font-size:13px;padding:6px 8px;">
+    <span style="font-size:13px;color:var(--text-sub);">¥</span>
+    <input type="number" class="input dedu-amount" placeholder="0" value="${item?.amount??''}" min="0" step="100" style="flex:1;font-size:13px;padding:6px 8px;text-align:right;">
+    <label style="display:flex;align-items:center;gap:3px;font-size:11px;cursor:pointer;white-space:nowrap;">
+      <input type="checkbox" class="dedu-active" ${(item?.active!==false)?'checked':''}>有効
+    </label>
+    <button type="button" class="btn-ghost" onclick="this.parentElement.remove()" style="padding:3px 7px;font-size:11px;color:var(--danger);">🗑</button>
+  `;
+  $('mem-edit-deductions').appendChild(row);
 };
 
 window.closeMemberEdit=function(){
@@ -1243,8 +1305,26 @@ window.saveMemberEdit=async function(){
   };
   btn.disabled=true;btn.textContent='保存中...';
   const {error}=await sb.from('profiles').update(updates).eq('id',id);
+  if(error){btn.disabled=false;btn.textContent='保存';err.textContent='保存失敗: '+error.message;err.style.display='block';return;}
+
+  // 差引項目を保存: 既存全削除 + 新規一括 insert (シンプル化)
+  const rows=Array.from(document.querySelectorAll('#mem-edit-deductions .dedu-row'));
+  const items=rows.map((row,idx)=>{
+    const label=row.querySelector('.dedu-label').value.trim();
+    const amount=parseInt(row.querySelector('.dedu-amount').value,10);
+    const active=row.querySelector('.dedu-active').checked;
+    if(!label||isNaN(amount)||amount<0)return null;
+    return {profile_id:id,label,amount,active,sort_order:idx};
+  }).filter(Boolean);
+
+  const {error:delErr}=await sb.from('member_deductions').delete().eq('profile_id',id);
+  if(delErr){btn.disabled=false;btn.textContent='保存';err.textContent='差引項目削除失敗: '+delErr.message;err.style.display='block';return;}
+  if(items.length>0){
+    const {error:insErr}=await sb.from('member_deductions').insert(items);
+    if(insErr){btn.disabled=false;btn.textContent='保存';err.textContent='差引項目保存失敗: '+insErr.message;err.style.display='block';return;}
+  }
+
   btn.disabled=false;btn.textContent='保存';
-  if(error){err.textContent='保存失敗: '+error.message;err.style.display='block';return;}
   // ローカルキャッシュ更新 + 再描画
   const m=allMembers.find(x=>x.id===id);
   if(m)Object.assign(m,updates);
