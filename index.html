@@ -168,6 +168,7 @@ table.detail tr.sat{background:#fef3c7;}
             <option value="no_site">現場未設定のみ</option>
           </select>
           <button class="btn" onclick="loadMembers()">🔄 再読み込み</button>
+          <button class="btn" onclick="autoFillSites()" title="各ツール (新聞/アスクル/デリバリー) のデータから配属現場を自動補完" style="background:#10b981;">📥 ツールから自動補完</button>
         </div>
         <div style="font-size:12px;color:var(--text-sub);">
           <span id="admin-mbr-count">読み込み中...</span>
@@ -1123,6 +1124,104 @@ window.openMemberEdit=function(id){
 window.closeMemberEdit=function(){
   $('member-edit-modal').style.display='none';
 };
+
+async function autoFillSites(){
+  if(!confirm('各ツール (新聞/アスクル/デリバリー) のデータから配属現場を自動補完します。\n\n対象: 配属現場が空欄のメンバーのみ (既設定者はスキップ)。\n\n続行しますか?'))return;
+
+  // 1. 3 つの RPC を並列に呼んで phone → site のマップを構築
+  // - NexPort: closed_pay_statements から営業所
+  // - askul: profiles + offices.name
+  // - delivery: profiles + clients.short_name (集約)
+  const askulRpc=async()=>{
+    const r=await fetch('https://erfcsnzdooswgpvgrapb.supabase.co/rest/v1/rpc/get_driver_site_map',{
+      method:'POST',headers:{'Content-Type':'application/json','apikey':ASKUL_ANON,'Authorization':'Bearer '+ASKUL_ANON},body:'{}',
+    });
+    if(!r.ok)return [];
+    return await r.json();
+  };
+  const deliveryRpc=async()=>{
+    const r=await fetch('https://ymdaakiwxkjotlmzveom.supabase.co/rest/v1/rpc/get_driver_site_map',{
+      method:'POST',headers:{'Content-Type':'application/json','apikey':DELIVERY_ANON,'Authorization':'Bearer '+DELIVERY_ANON},body:'{}',
+    });
+    if(!r.ok)return [];
+    return await r.json();
+  };
+  const nexportRpc=async()=>{
+    const {data}=await sb.rpc('get_shift_area_map');
+    return data||[];
+  };
+
+  const btn=event?.target;
+  if(btn){btn.disabled=true;btn.textContent='取得中...';}
+
+  let shiftRows=[],askulRows=[],deliveryRows=[];
+  try{
+    [shiftRows,askulRows,deliveryRows]=await Promise.all([nexportRpc(),askulRpc(),deliveryRpc()]);
+  }catch(e){
+    alert('取得失敗: '+e.message);
+    if(btn){btn.disabled=false;btn.textContent='📥 ツールから自動補完';}
+    return;
+  }
+
+  // phone → site の各マップ (normalize 済み phone をキーに)
+  const shiftMap={},askulMap={},deliveryMap={};
+  shiftRows.forEach(r=>{const np=normalizePhone(r.phone);if(np&&r.area)shiftMap[np]=r.area;});
+  askulRows.forEach(r=>{const np=normalizePhone(r.phone);if(np&&r.site)askulMap[np]=r.site;});
+  deliveryRows.forEach(r=>{const np=normalizePhone(r.phone);if(np&&r.site)deliveryMap[np]=r.site;});
+
+  // 各メンバーで合成
+  const updates=[];
+  let noChange=0,skipped=0;
+  for(const m of allMembers){
+    if(m.site){skipped++;continue;}// 既設定はスキップ
+    if(!m.phone)continue;
+    const np=normalizePhone(m.phone);
+    const parts=[];
+    if(shiftMap[np])parts.push('🗞'+shiftMap[np]);
+    if(askulMap[np])parts.push('📦'+askulMap[np]);
+    if(deliveryMap[np])parts.push('🚚'+deliveryMap[np]);
+    if(parts.length===0){noChange++;continue;}
+    updates.push({id:m.id,newSite:parts.join(' / ')});
+  }
+
+  if(updates.length===0){
+    if(btn){btn.disabled=false;btn.textContent='📥 ツールから自動補完';}
+    alert(`更新対象なし\n既設定: ${skipped}名\n3ツールいずれにもデータ無し: ${noChange}名`);
+    return;
+  }
+
+  // プレビュー: 何件更新するか確認
+  const sample=updates.slice(0,5).map(u=>{
+    const m=allMembers.find(x=>x.id===u.id);
+    return `・${m?.display_name||'(無名)'} → ${u.newSite}`;
+  }).join('\n');
+  const more=updates.length>5?`\n...他 ${updates.length-5}名`:'';
+  if(!confirm(`${updates.length}名 を自動補完します:\n\n${sample}${more}\n\nスキップ: 既設定 ${skipped}名 / データ無し ${noChange}名\n\n更新を実行しますか?`)){
+    if(btn){btn.disabled=false;btn.textContent='📥 ツールから自動補完';}
+    return;
+  }
+
+  // バッチ更新 (10件ずつ並列)
+  if(btn){btn.textContent='更新中... (0/'+updates.length+')';}
+  let done=0,errors=0;
+  for(let i=0;i<updates.length;i+=10){
+    const batch=updates.slice(i,i+10);
+    await Promise.all(batch.map(async u=>{
+      const {error}=await sb.from('profiles').update({site:u.newSite}).eq('id',u.id);
+      if(error){errors++;console.error('update failed for',u.id,error);}
+      else{
+        const m=allMembers.find(x=>x.id===u.id);
+        if(m)m.site=u.newSite;
+      }
+      done++;
+    }));
+    if(btn)btn.textContent=`更新中... (${done}/${updates.length})`;
+  }
+
+  if(btn){btn.disabled=false;btn.textContent='📥 ツールから自動補完';}
+  renderMemberList();
+  alert(`✓ 自動補完完了\n更新成功: ${done-errors}名${errors>0?`\n失敗: ${errors}名 (コンソール参照)`:''}\nスキップ (既設定): ${skipped}名\nデータ無し: ${noChange}名`);
+}
 
 window.saveMemberEdit=async function(){
   const btn=$('mem-edit-save-btn');
