@@ -167,6 +167,10 @@ table.detail tr.sat{background:#fef3c7;}
             <option value="no_phone">電話未登録のみ</option>
             <option value="no_site">現場未設定のみ</option>
           </select>
+          <select id="admin-mbr-groupby" class="input" onchange="renderMemberList()" title="表示モード">
+            <option value="none">個人一覧</option>
+            <option value="company">会社別グループ</option>
+          </select>
           <button class="btn" onclick="loadMembers()">🔄 再読み込み</button>
           <button class="btn" onclick="autoFillSites()" title="各ツール (新聞/アスクル/デリバリー) のデータから配属現場を自動補完" style="background:#10b981;">📥 ツールから自動補完</button>
         </div>
@@ -1117,12 +1121,24 @@ function renderMemberList(){
     return;
   }
 
-  const rows=list.map(p=>{
+  const groupBy=($('admin-mbr-groupby')||{}).value||'none';
+  // 会社名の正規化 (半角/全角・前後空白・株式会社プレフィックス除去で同一視)
+  const normalizeCompany=(s)=>{
+    if(!s)return '';
+    let n=String(s).trim();
+    // 全角→半角の英数字変換
+    n=n.replace(/[Ａ-Ｚａ-ｚ０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0));
+    n=n.replace(/\s+/g,'').toLowerCase();
+    n=n.replace(/^株式会社|^(株)|（株）|株式会社$|(株)$/g,'');
+    return n;
+  };
+
+  const renderRow=(p)=>{
     const adminTag=(p.role==='super_admin')?'<span style="background:#fde68a;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">最高管理者</span>'
       :(p.role==='admin')?'<span style="background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">管理者</span>':'';
     const ownerTag=p.is_company_owner?'<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">👑 オーナー</span>':'';
     const pendingTag=p.account_status==='pending_approval'?'<span style="background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">承認待ち</span>':'';
-    const sub=[p.company,p.position,p.employment_type].filter(Boolean).join(' / ');
+    const sub=[(groupBy==='company'?null:p.company),p.position,p.employment_type].filter(Boolean).join(' / ');
     const siteStr=p.site
       ? `<span style="background:#dbeafe;color:#1e40af;padding:1px 8px;border-radius:8px;font-size:10px;font-weight:600;">📍 ${escHtml(p.site)}</span>`
       : '<span style="background:#f1f5f9;color:#94a3b8;padding:1px 8px;border-radius:8px;font-size:10px;">📍 現場未設定</span>';
@@ -1138,9 +1154,43 @@ function renderMemberList(){
       <div style="font-size:12px;font-family:monospace;color:var(--text-sub);white-space:nowrap;">${phoneStr}</div>
       <button class="btn-ghost" onclick="openMemberEdit('${escHtml(p.id)}')">編集</button>
     </div>`;
-  }).join('');
+  };
 
-  listArea.innerHTML=`<div class="card" style="padding:0;overflow:hidden;">${rows}</div>`;
+  if(groupBy==='company'){
+    // 会社別にグループ化 (正規化キーで集約、 表示名は元データの最頻値を使用)
+    const groups=new Map(); // normalizedKey → { displayName, members: [] }
+    for(const p of list){
+      const key=normalizeCompany(p.company);
+      const disp=key?(p.company||'').trim():'(会社未設定)';
+      if(!groups.has(key))groups.set(key,{displayName:disp,members:[]});
+      groups.get(key).members.push(p);
+    }
+    // ソート: 会社未設定を最後、 それ以外はメンバー数降順
+    const arr=[...groups.entries()].sort((a,b)=>{
+      if(!a[0]&&b[0])return 1;
+      if(a[0]&&!b[0])return -1;
+      return b[1].members.length-a[1].members.length;
+    });
+    let html='';
+    for(const [key,g] of arr){
+      const ownerCnt=g.members.filter(m=>m.is_company_owner).length;
+      const adminCnt=g.members.filter(m=>m.role==='admin'||m.role==='super_admin').length;
+      const phoneSetCnt=g.members.filter(m=>!!m.phone).length;
+      html+=`<details class="card" style="padding:0;overflow:hidden;margin-bottom:10px;" ${key?'open':''}>
+        <summary style="padding:12px 14px;background:#f1f5f9;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px;font-weight:600;list-style:none;">
+          <span>🏢 ${escHtml(g.displayName)}</span>
+          <span style="font-size:11px;color:var(--text-sub);font-weight:400;">
+            ${g.members.length}名${ownerCnt?` / 👑 ${ownerCnt}`:''}${adminCnt?` / 管理 ${adminCnt}`:''} / 📞 ${phoneSetCnt}/${g.members.length}
+          </span>
+        </summary>
+        <div>${g.members.map(renderRow).join('')}</div>
+      </details>`;
+    }
+    listArea.innerHTML=html;
+  }else{
+    const rows=list.map(renderRow).join('');
+    listArea.innerHTML=`<div class="card" style="padding:0;overflow:hidden;">${rows}</div>`;
+  }
 }
 
 window.openMemberEdit=async function(id){
