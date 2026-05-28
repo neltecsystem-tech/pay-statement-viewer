@@ -1065,6 +1065,27 @@ async function downloadAllPdf(){
 // 管理者: メンバー管理画面
 // ───────────────────────────────────────────
 let allMembers=[];// 全 profiles のキャッシュ (admin 画面用)
+let toolCompanies=[];// 各ツール (askul/delivery) の profiles.company_name から取得した会社名候補
+
+// askul / delivery の get_company_list RPC を叩いて会社名候補を取得・キャッシュ。
+// 失敗しても datalist の NexPort 分は出るので握りつぶす。
+async function loadToolCompanies(){
+  const fetchRpc=async(base,key)=>{
+    try{
+      const r=await fetch(base+'/rest/v1/rpc/get_company_list',{
+        method:'POST',headers:{'Content-Type':'application/json','apikey':key,'Authorization':'Bearer '+key},body:'{}',
+      });
+      if(!r.ok)return [];
+      const rows=await r.json();
+      return (rows||[]).map(x=>x.company_name).filter(Boolean);
+    }catch(_){return [];}
+  };
+  const [askul,delivery]=await Promise.all([
+    fetchRpc('https://erfcsnzdooswgpvgrapb.supabase.co',ASKUL_ANON),
+    fetchRpc('https://ymdaakiwxkjotlmzveom.supabase.co',DELIVERY_ANON),
+  ]);
+  toolCompanies=[...askul,...delivery];
+}
 
 function openAdminScreen(){
   if(profile?.role!=='admin'&&profile?.role!=='super_admin'){alert('管理者権限が必要です');return;}
@@ -1090,6 +1111,8 @@ async function loadMembers(){
   }
   allMembers=data||[];
   renderMemberList();
+  // ツールの会社名候補をバックグラウンドで取得 (datalist サジェスト用、 失敗無視)
+  loadToolCompanies();
 }
 
 function renderMemberList(){
@@ -1207,8 +1230,10 @@ window.openMemberEdit=async function(id){
   // 既に登録済みの site 値を datalist のサジェストに反映
   const uniqueSites=[...new Set(allMembers.map(m=>m.site).filter(Boolean))].sort();
   $('site-suggestions').innerHTML=uniqueSites.map(s=>`<option value="${escHtml(s)}">`).join('');
-  // 既に登録済みの会社名を datalist のサジェストに反映 (タイポ・表記ゆれ防止)
-  const uniqueCompanies=[...new Set(allMembers.map(m=>(m.company||'').trim()).filter(Boolean))].sort();
+  // 会社名サジェスト: NexPort profiles の既登録会社名 + 各ツール (askul/delivery) の
+  // 所属法人名をマージ (タイポ・表記ゆれ防止)
+  const nexportCompanies=allMembers.map(m=>(m.company||'').trim()).filter(Boolean);
+  const uniqueCompanies=[...new Set([...nexportCompanies,...toolCompanies.map(c=>(c||'').trim()).filter(Boolean)])].sort();
   $('company-suggestions').innerHTML=uniqueCompanies.map(c=>`<option value="${escHtml(c)}">`).join('');
   $('mem-edit-err').style.display='none';
   $('mem-edit-save-btn').dataset.id=id;
