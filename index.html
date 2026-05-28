@@ -166,6 +166,7 @@ table.detail tr.sat{background:#fef3c7;}
             <option value="owners">法人オーナーのみ</option>
             <option value="no_phone">電話未登録のみ</option>
             <option value="no_site">現場未設定のみ</option>
+            <option value="hidden">🔒 金額非表示のみ</option>
           </select>
           <select id="admin-mbr-groupby" class="input" onchange="renderMemberList()" title="表示モード">
             <option value="none">個人一覧</option>
@@ -1087,6 +1088,44 @@ async function loadToolCompanies(){
   toolCompanies=[...askul,...delivery];
 }
 
+// 金額が「本人から見て非表示」になる電話番号 (正規化済み) の集合。
+// 非表示条件 = 法人/社員区分の非オーナー。 admin/super_admin は除外 (本人は自分の金額が見える)。
+let hiddenPhones=new Set();
+async function loadBizTypes(){
+  const fetchRpc=async(base,key)=>{
+    try{
+      const r=await fetch(base+'/rest/v1/rpc/get_biz_type_map',{
+        method:'POST',headers:{'Content-Type':'application/json','apikey':key,'Authorization':'Bearer '+key},body:'{}',
+      });
+      if(!r.ok)return [];
+      return await r.json()||[];
+    }catch(_){return [];}
+  };
+  const nexportRpc=async()=>{ try{const {data}=await sb.rpc('get_biz_type_map');return data||[];}catch(_){return [];} };
+  const [shift,askul,delivery]=await Promise.all([
+    nexportRpc(),
+    fetchRpc('https://erfcsnzdooswgpvgrapb.supabase.co',ASKUL_ANON),
+    fetchRpc('https://ymdaakiwxkjotlmzveom.supabase.co',DELIVERY_ANON),
+  ]);
+  const s=new Set();
+  // 新聞: biz_type==='法人' で非表示
+  shift.forEach(r=>{const np=normalizePhone(r.phone);if(np&&r.biz_type==='法人')s.add(np);});
+  // askul/delivery: business_type が corporation / employee で非表示
+  const hideBiz=bt=>bt==='corporation'||bt==='employee';
+  askul.forEach(r=>{const np=normalizePhone(r.phone);if(np&&hideBiz(r.business_type))s.add(np);});
+  delivery.forEach(r=>{const np=normalizePhone(r.phone);if(np&&hideBiz(r.business_type))s.add(np);});
+  hiddenPhones=s;
+}
+
+// メンバー本人視点で金額が非表示になるか
+function isAmountHidden(m){
+  if(m.is_company_owner)return false;               // オーナーは見える
+  if(m.role==='admin'||m.role==='super_admin')return false; // 管理者は本人でも見える
+  const np=normalizePhone(m.phone);
+  if(!np)return false;                              // 電話未登録は判定不能 → 印なし
+  return hiddenPhones.has(np);
+}
+
 function openAdminScreen(){
   if(profile?.role!=='admin'&&profile?.role!=='super_admin'){alert('管理者権限が必要です');return;}
   $('screen-main').style.display='none';
@@ -1113,6 +1152,8 @@ async function loadMembers(){
   renderMemberList();
   // ツールの会社名候補をバックグラウンドで取得 (datalist サジェスト用、 失敗無視)
   loadToolCompanies();
+  // 各ツールの区分から「金額非表示」の人を判定 → 取得後に再描画してバッジ表示
+  loadBizTypes().then(()=>renderMemberList());
 }
 
 function renderMemberList(){
@@ -1126,6 +1167,7 @@ function renderMemberList(){
   else if(filter==='owners')list=list.filter(p=>!!p.is_company_owner);
   else if(filter==='no_phone')list=list.filter(p=>!p.phone);
   else if(filter==='no_site')list=list.filter(p=>!p.site);
+  else if(filter==='hidden')list=list.filter(p=>isAmountHidden(p));
 
   if(search){
     const q=search;
@@ -1162,6 +1204,7 @@ function renderMemberList(){
       :(p.role==='admin')?'<span style="background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">管理者</span>':'';
     const ownerTag=p.is_company_owner?'<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">👑 オーナー</span>':'';
     const pendingTag=p.account_status==='pending_approval'?'<span style="background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">承認待ち</span>':'';
+    const hiddenTag=isAmountHidden(p)?'<span title="法人/社員区分のため本人は自分の金額を見られません。 👑オーナー設定で表示可" style="background:#f3e8ff;color:#6b21a8;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">🔒 金額非表示</span>':'';
     const sub=[(groupBy==='company'?null:p.company),p.position,p.employment_type].filter(Boolean).join(' / ');
     const siteStr=p.site
       ? `<span style="background:#dbeafe;color:#1e40af;padding:1px 8px;border-radius:8px;font-size:10px;font-weight:600;">📍 ${escHtml(p.site)}</span>`
@@ -1169,7 +1212,7 @@ function renderMemberList(){
     const phoneStr=p.phone?escHtml(p.phone):'<span style="color:var(--danger);">未登録</span>';
     return `<div class="mbr-row" style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border);">
       <div style="flex:1;min-width:0;">
-        <div style="font-weight:600;font-size:14px;">${escHtml(p.display_name||'(名前未設定)')}${adminTag}${ownerTag}${pendingTag}</div>
+        <div style="font-weight:600;font-size:14px;">${escHtml(p.display_name||'(名前未設定)')}${adminTag}${ownerTag}${pendingTag}${hiddenTag}</div>
         <div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
           ${siteStr}
           ${sub?`<span style="font-size:11px;color:var(--text-sub);">${escHtml(sub)}</span>`:''}
