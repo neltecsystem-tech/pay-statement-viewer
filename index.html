@@ -471,11 +471,14 @@ async function loadFor(phone){
 
   const callEf=async (url,anon)=>{
     try{
+      const userJwt=session?.access_token||'';
       const resp=await fetch(url,{
         method:'POST',
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+anon},
-        body:JSON.stringify({phone,year_month:ym})
+        body:JSON.stringify({phone,year_month:ym,auth_token:userJwt})
       });
+      if(resp.status===401)return {error:'認証エラー',code:'AUTH'};
+      if(resp.status===403)return {error:'この明細にアクセスする権限がありません',code:'FORBIDDEN'};
       if(!resp.ok)return {error:`HTTP ${resp.status}`};
       return await resp.json();
     }catch(e){return {error:e.message};}
