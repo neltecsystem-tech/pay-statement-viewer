@@ -895,12 +895,6 @@ function buildSummaryHtml(){
     </div>
     <div style="border-top:1px solid #111;margin:0 0 8px;"></div>
     <div style="text-align:center;font-size:12px;padding:6px 0 14px;">振込先 / ${bank?escHtml(bank):'<span style="color:#9ca3af;">（NELTEC会計の口座情報を連携予定）</span>'}</div>
-
-    <div style="text-align:center;color:#d33;font-weight:700;font-size:15px;margin-top:6px;">仕分例</div>
-    <div style="text-align:center;color:#d33;font-size:12px;line-height:1.9;margin-top:4px;">
-      外注委託費　${fmtNum(subtotal)}　/　買掛金　${fmtNum(payAmount)}　/　${m}月分　/　${escHtml(owner)}　/　区分表示　/　80％経過措置
-      ${lease?`<br>車両リース売上　${fmtNum(lease)}`:'<br>車両リース売上　0'}
-    </div>
   </div>`;
 }
 
