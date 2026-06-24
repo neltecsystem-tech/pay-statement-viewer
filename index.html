@@ -790,11 +790,12 @@ async function renderToPdfBlob(html){
   return pdf;
 }
 
-// ----- サマリーPDF (1ページ全ツール集計) -----
+// ----- サマリーPDF (支払通知書フォーマット: サンプル準拠) -----
 function buildSummaryHtml(){
   if(!currentData)return '';
   const {shift,askul,delivery,ym}=currentData;
   const [y,m]=ym.split('-').map(Number);
+  const fmtNum=n=>Math.round(Number(n)||0).toLocaleString();
   const total=calcTotal(currentData);
   const shiftTotal=(shift?.statements||[]).reduce((s,r)=>s+(shouldHide(r,'shift')?0:(r.grand_total||0)),0);
   const askulTotal=(askul?.statements||[]).reduce((s,r)=>s+(shouldHide(r,'askul')?0:(r.payment_amount||0)),0);
@@ -802,41 +803,104 @@ function buildSummaryHtml(){
   const shiftHidden=(shift?.statements||[]).some(r=>shouldHide(r,'shift'));
   const askulHidden=(askul?.statements||[]).some(r=>shouldHide(r,'askul'));
   const deliveryHidden=(delivery?.statements||[]).some(r=>shouldHide(r,'delivery'));
-  const row=(label,total,sub,color,hidden)=>`
-    <tr>
-      <td style="border:1px solid #94a3b8;padding:10px 14px;background:${color};color:#fff;font-weight:600;width:30%;">${escHtml(label)}</td>
-      <td style="border:1px solid #94a3b8;padding:10px 14px;font-size:11px;color:#475569;">${escHtml(sub||'—')}</td>
-      <td style="border:1px solid #94a3b8;padding:10px 14px;text-align:right;font-size:${hidden?12:18}px;font-weight:700;color:${hidden?'#94a3b8':'#0f172a'};">${hidden?'非表示':(total?fmtYen(total):'—')}</td>
-    </tr>`;
-  const shiftSub=(shift?.statements||[]).map(s=>`${s.staff_name}${s.primary_area?` (${s.primary_area})`:''}`).join(' / ');
-  const askulSub=(askul?.statements||[]).map(s=>`${s.driver_name}${s.company_name?` / ${s.company_name}`:''}`).join(' / ');
-  const deliverySub=(delivery?.statements||[]).map(s=>`${s.driver_name}${s.finalized?' (確定)':' (見込)'}`).join(' / ');
-  return `<div style="padding:32px;width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans',sans-serif;">
-    <div style="text-align:center;border-bottom:3px solid #4f46e5;padding-bottom:14px;margin-bottom:24px;">
-      <div style="font-size:13px;color:#64748b;">統合支払明細書 サマリー</div>
-      <h1 style="margin:6px 0 0;font-size:24px;color:#4f46e5;">${escHtml(eraLabel(y,m))}</h1>
+  const owner=ownerName();
+  // 車両リース料などの控除はビューアに未連携 (将来 NELTEC 会計から連携)
+  const lease=Number(currentData.vehicle_lease||0);
+  const subtotal=total+lease;       // 小計 = お支払額 + 車両リース料
+  const payAmount=total;            // お支払額 / 合計金額
+  // 振込先 (将来 NELTEC 会計の口座情報を連携。今は任意フィールド or 空欄)
+  const bank=currentData.bank_account||targetProfile?.bank_account||'';
+  const mgmtNo=`N-${y}${String(m).padStart(2,'0')}`;
+  const issueDate=`${new Date().getFullYear()}年${new Date().getMonth()+1}月${new Date().getDate()}日`;
+
+  // 摘要テーブル行 (ツールごと)。先頭行のみ ドライバー/年月 を表示
+  const tools=[];
+  if((shift?.statements||[]).length)   tools.push({label:'新聞シフト 配達業務委託',total:shiftTotal,hidden:shiftHidden});
+  if((askul?.statements||[]).length)   tools.push({label:'ASKUL LOGIST 配送業務委託',total:askulTotal,hidden:askulHidden});
+  if((delivery?.statements||[]).length)tools.push({label:'デリバリー 配送業務委託',total:deliveryTotal,hidden:deliveryHidden});
+  const MIN_ROWS=7;
+  let tbody='';
+  for(let i=0;i<Math.max(MIN_ROWS,tools.length);i++){
+    const t=tools[i];
+    const zebra=i%2===1?'#f8fafc':'#fff';
+    const cell='border-bottom:1px solid #e5e7eb;padding:9px 10px;font-size:12px;';
+    if(t){
+      tbody+=`<tr style="background:${zebra};">
+        <td style="${cell}text-align:center;">${i===0?escHtml(owner):''}</td>
+        <td style="${cell}text-align:center;white-space:nowrap;">${i===0?escHtml(eraLabel(y,m)):''}</td>
+        <td style="${cell}">${escHtml(t.label)}${i===0?'<div style="font-size:10px;color:#6b7280;margin-top:2px;">詳細は別紙のとおり</div>':''}</td>
+        <td style="${cell}text-align:right;font-weight:600;">${t.hidden?'非表示':fmtNum(t.total)}</td>
+      </tr>`;
+    }else{
+      tbody+=`<tr style="background:${zebra};"><td style="${cell}">&nbsp;</td><td style="${cell}"></td><td style="${cell}"></td><td style="${cell}"></td></tr>`;
+    }
+  }
+
+  const bar='background:#111;height:14px;';
+  return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans','Hiragino Kaku Gothic Pro',sans-serif;color:#111;padding:30px 40px 36px;">
+    <div style="${bar}margin-bottom:18px;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;">
+      <h1 style="margin:0;font-size:30px;font-weight:800;letter-spacing:6px;">支払通知書</h1>
+      <div style="text-align:right;font-size:12px;line-height:1.8;">
+        <div>${issueDate}</div>
+        <div>管理番号：${escHtml(mgmtNo)}</div>
+      </div>
     </div>
-    <div style="display:flex;justify-content:space-between;margin-bottom:24px;font-size:13px;">
-      <div><div style="color:#64748b;font-size:11px;">対象者</div><div style="font-size:16px;font-weight:600;margin-top:2px;">${escHtml(ownerName())}</div></div>
-      <div style="text-align:right;"><div style="color:#64748b;font-size:11px;">発行日</div><div style="font-size:13px;margin-top:2px;">${new Date().toLocaleDateString('ja-JP')}</div></div>
+
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
+      <div style="flex:1;padding-right:24px;">
+        <div style="font-size:20px;font-weight:700;border-bottom:1.5px solid #111;padding-bottom:4px;display:inline-block;min-width:230px;">${escHtml(owner)}<span style="font-size:14px;font-weight:400;margin-left:24px;">様</span></div>
+        <div style="font-size:12px;margin-top:14px;">下記のとおりお支払い申し上げます。</div>
+        <div style="display:flex;align-items:flex-end;gap:18px;margin-top:18px;">
+          <div style="font-size:14px;font-weight:600;">お支払額</div>
+          <div style="font-size:26px;font-weight:800;letter-spacing:1px;">${fmtNum(payAmount)}</div>
+        </div>
+      </div>
+      <div style="position:relative;width:250px;font-size:12px;line-height:1.85;padding-top:2px;">
+        <div style="font-weight:700;">株式会社ＮＥＬＴＥＣ</div>
+        <div>〒170-0005</div>
+        <div>東京都豊島区南大塚2-38-1</div>
+        <div>リードシー大塚ビル5F-7号室</div>
+        <div>TEL: 090-9295-0785</div>
+        <div>FAX: 03-4243-3498</div>
+        <div style="position:absolute;top:-4px;right:6px;width:64px;height:64px;border:2px solid #d33;border-radius:8px;color:#d33;font-weight:700;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.25;transform:rotate(-7deg);font-size:11px;">
+          <div>株式会社</div><div>NELTEC</div>
+        </div>
+      </div>
     </div>
-    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:24px;">
-      <thead><tr style="background:#f1f5f9;">
-        <th style="border:1px solid #94a3b8;padding:8px;text-align:left;width:30%;">ツール</th>
-        <th style="border:1px solid #94a3b8;padding:8px;text-align:left;">内訳</th>
-        <th style="border:1px solid #94a3b8;padding:8px;text-align:right;">支払額</th>
+
+    <div style="${bar}margin:6px 0 0;"></div>
+    <table style="width:100%;border-collapse:collapse;">
+      <thead><tr>
+        <th style="padding:8px 10px;font-size:12px;border-bottom:1.5px solid #111;text-align:center;width:20%;">ドライバー</th>
+        <th style="padding:8px 10px;font-size:12px;border-bottom:1.5px solid #111;text-align:center;width:16%;">年月</th>
+        <th style="padding:8px 10px;font-size:12px;border-bottom:1.5px solid #111;text-align:left;">摘要</th>
+        <th style="padding:8px 10px;font-size:12px;border-bottom:1.5px solid #111;text-align:right;width:18%;">金額</th>
       </tr></thead>
-      <tbody>
-        ${row('📰 新聞シフト',shiftTotal,shiftSub,'#0ea5e9',shiftHidden)}
-        ${row('📦 アスクル',askulTotal,askulSub,'#f97316',askulHidden)}
-        ${row('🚚 デリバリー',deliveryTotal,deliverySub,'#10b981',deliveryHidden)}
-      </tbody>
+      <tbody>${tbody}</tbody>
     </table>
-    <div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid #f59e0b;border-radius:10px;padding:20px;text-align:center;margin-bottom:14px;">
-      <div style="font-size:12px;color:#92400e;font-weight:600;">${escHtml(eraLabel(y,m))} 総支払額</div>
-      <div style="font-size:36px;font-weight:700;color:#92400e;margin-top:6px;">${fmtYen(total)}</div>
+
+    <div style="${bar}margin:0 0 12px;"></div>
+    <div style="display:flex;justify-content:flex-end;">
+      <table style="border-collapse:collapse;font-size:13px;min-width:300px;">
+        <tr><td style="padding:4px 14px;text-align:right;color:#374151;">小計</td><td style="padding:4px 6px;text-align:right;font-weight:600;min-width:110px;">${fmtNum(subtotal)}</td></tr>
+        <tr><td style="padding:4px 14px;text-align:right;color:#374151;">車両リース料</td><td style="padding:4px 6px;text-align:right;font-weight:600;">${lease?('-'+fmtNum(lease)):'0'}</td></tr>
+      </table>
     </div>
-    <div style="color:#94a3b8;font-size:10px;text-align:right;margin-top:24px;">📑 統合支払明細ビューア / Neltec System</div>
+
+    <div style="border-top:1px solid #111;margin:8px 0 0;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;">
+      <div style="font-size:11px;color:#374151;">＊お振込手数料はご負担をお願い致します</div>
+      <div style="display:flex;align-items:center;gap:24px;"><div style="font-size:14px;font-weight:700;">合計金額</div><div style="font-size:20px;font-weight:800;min-width:120px;text-align:right;">${fmtNum(payAmount)}</div></div>
+    </div>
+    <div style="border-top:1px solid #111;margin:0 0 8px;"></div>
+    <div style="text-align:center;font-size:12px;padding:6px 0 14px;">振込先 / ${bank?escHtml(bank):'<span style="color:#9ca3af;">（NELTEC会計の口座情報を連携予定）</span>'}</div>
+
+    <div style="text-align:center;color:#d33;font-weight:700;font-size:15px;margin-top:6px;">仕分例</div>
+    <div style="text-align:center;color:#d33;font-size:12px;line-height:1.9;margin-top:4px;">
+      外注委託費　${fmtNum(subtotal)}　/　買掛金　${fmtNum(payAmount)}　/　${m}月分　/　${escHtml(owner)}　/　区分表示　/　80％経過措置
+      ${lease?`<br>車両リース売上　${fmtNum(lease)}`:'<br>車両リース売上　0'}
+    </div>
   </div>`;
 }
 
