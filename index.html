@@ -318,10 +318,13 @@ function matchTool(m,maps,dup){
 function resolveInvoiceNo(prof,ym){
   if(!prof)return null;
   if(prof.invoice_number)return {no:prof.invoice_number,src:'手入力'};
+  const okMonth=p=>(!p.effective_from || String(p.effective_from).slice(0,7)<=(ym||'9999-99'));
+  // ① 会社名で会計マスタ(取引先)を照合 (法人ドライバー)
   const co=normCo(prof.company);
-  if(!co)return null;
-  const hit=invPartners.find(p=>normCo(p.name)===co && (!p.effective_from || String(p.effective_from).slice(0,7)<=(ym||'9999-99')));
-  if(hit)return {no:hit.invoice_number,src:'会計マスタ'};
+  if(co){const hit=invPartners.find(p=>normCo(p.name)===co && okMonth(p));if(hit)return {no:hit.invoice_number,src:'会計マスタ(会社名)'};}
+  // ② 本人の氏名で照合 (個人事業主が取引先として適格登録されている場合)
+  const nm=normCo(prof.display_name);
+  if(nm){const hit=invPartners.find(p=>normCo(p.name)===nm && okMonth(p));if(hit)return {no:hit.invoice_number,src:'会計マスタ(氏名)'};}
   return null;
 }
 
@@ -1417,13 +1420,16 @@ function memUpdateInvoiceHint(){
   const manual=normInvoiceNo(($('mem-edit-invoice')||{}).value);
   if(manual){el.style.display='none';return;}// 手入力があれば自動参照は使わない
   const company=(($('mem-edit-company')||{}).value||'').trim();
-  if(!company){el.style.display='none';return;}
+  const dispName=(($('mem-edit-name')||{}).value||'').trim();
+  if(!company&&!dispName){el.style.display='none';return;}
   const now=new Date();const ym=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-  const res=resolveInvoiceNo({invoice_number:null,company},ym);
+  const res=resolveInvoiceNo({invoice_number:null,company,display_name:dispName},ym);
   if(res){
-    el.innerHTML=`🧾 会計マスタより自動取得: <b>${escHtml(res.no)}</b><br><span style="color:#0e7490;">会社名「${escHtml(company)}」で照合。手入力しなくても明細に自動表示されます。</span>`;
+    const via=res.src&&res.src.includes('氏名')?`氏名「${escHtml(dispName)}」`:`会社名「${escHtml(company)}」`;
+    el.innerHTML=`🧾 会計マスタより自動取得: <b>${escHtml(res.no)}</b><br><span style="color:#0e7490;">${via}で照合。手入力しなくても明細に自動表示されます。</span>`;
   }else{
-    el.innerHTML=`<span style="color:#b45309;">会社名「${escHtml(company)}」は会計マスタにT番号が見つかりません（免税/未登録、または会社名の表記ゆれ）。手入力も可能です。</span>`;
+    const key=company?`会社名「${escHtml(company)}」`:`氏名「${escHtml(dispName)}」`;
+    el.innerHTML=`<span style="color:#b45309;">${key}は会計マスタの適格T番号に見つかりません（免税/区分記載、または表記ゆれ）。手入力も可能です。</span>`;
   }
   el.style.display='block';
 }
