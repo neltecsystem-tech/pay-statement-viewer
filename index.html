@@ -175,6 +175,7 @@ table.detail tr.sat{background:#fef3c7;}
           </select>
           <button class="btn" onclick="loadMembers()">🔄 再読み込み</button>
           <button class="btn" onclick="autoFillSites()" title="各ツール (新聞/アスクル/デリバリー) のデータから配属現場を自動補完" style="background:#10b981;">📥 ツールから自動補完</button>
+          <button class="btn" onclick="autoFillCompanies()" title="各ツール(アスクル/デリバリー)の所属法人から会社名を自動補完。会計マスタにT番号があれば明細に自動反映" style="background:#6366f1;">🏢 会社名を自動補完</button>
         </div>
         <div style="font-size:12px;color:var(--text-sub);">
           <span id="admin-mbr-count">読み込み中...</span>
@@ -1534,6 +1535,58 @@ async function autoFillSites(){
   if(btn){btn.disabled=false;btn.textContent='📥 ツールから自動補完';}
   renderMemberList();
   alert(`✓ 自動補完完了\n更新成功: ${done-errors}名${errors>0?`\n失敗: ${errors}名 (コンソール参照)`:''}\nスキップ (既設定): ${skipped}名\nデータ無し: ${noChange}名`);
+}
+
+// 各ツール(アスクル/デリバリー)の所属法人から profiles.company を自動補完。
+// 氏名 or 電話で突合。会社名が入れば、会計マスタのT番号が明細に自動反映される (resolveInvoiceNo)。
+async function autoFillCompanies(){
+  if(!confirm('各ツール(アスクル/デリバリー)の所属法人から「会社名」を自動補完します。\n\n対象: 会社名が空欄のメンバーのみ(既設定はスキップ)。\n氏名または電話で突合します。\n\n続行しますか?'))return;
+  const btn=event?.target;
+  if(btn){btn.disabled=true;btn.textContent='取得中...';}
+  const rpc=async(base,anon)=>{
+    try{
+      const r=await fetch(base+'/rest/v1/rpc/get_driver_company_map',{method:'POST',headers:{'Content-Type':'application/json','apikey':anon,'Authorization':'Bearer '+anon},body:'{}'});
+      if(!r.ok)return [];return await r.json();
+    }catch(_){return [];}
+  };
+  let rows=[];
+  try{
+    const [a,d]=await Promise.all([
+      rpc('https://erfcsnzdooswgpvgrapb.supabase.co',ASKUL_ANON),
+      rpc('https://ymdaakiwxkjotlmzveom.supabase.co',DELIVERY_ANON),
+    ]);
+    rows=[...(a||[]),...(d||[])];
+  }catch(e){alert('取得失敗: '+e.message);if(btn){btn.disabled=false;btn.textContent='🏢 会社名を自動補完';}return;}
+  const nm=s=>String(s||'').replace(/[\s　]/g,'').trim();
+  const byPhone={},byName={};
+  rows.forEach(r=>{const co=(r.company_name||'').trim();if(!co)return;const p=normalizePhone(r.phone);if(p)byPhone[p]=co;const n=nm(r.full_name);if(n)byName[n]=co;});
+  const updates=[];let skipped=0,noData=0;
+  for(const m of allMembers){
+    if(m.company){skipped++;continue;}
+    const p=normalizePhone(m.phone);
+    const co=(p&&byPhone[p])||byName[nm(m.display_name)];
+    if(!co){noData++;continue;}
+    updates.push({id:m.id,company:co});
+  }
+  if(!updates.length){if(btn){btn.disabled=false;btn.textContent='🏢 会社名を自動補完';}alert(`更新対象なし\n既設定: ${skipped}名 / ツールに所属法人なし(氏名・電話 不一致): ${noData}名`);return;}
+  const sample=updates.slice(0,8).map(u=>{const m=allMembers.find(x=>x.id===u.id);return `・${m?.display_name||'(無名)'} → ${u.company}`;}).join('\n');
+  const more=updates.length>8?`\n...他 ${updates.length-8}名`:'';
+  if(!confirm(`${updates.length}名 に会社名を設定します:\n\n${sample}${more}\n\n設定後、会計マスタにT番号があれば明細に自動表示されます。\n実行しますか?`)){if(btn){btn.disabled=false;btn.textContent='🏢 会社名を自動補完';}return;}
+  if(btn)btn.textContent='更新中... (0/'+updates.length+')';
+  let done=0,errors=0;
+  for(let i=0;i<updates.length;i+=10){
+    const batch=updates.slice(i,i+10);
+    await Promise.all(batch.map(async u=>{
+      const {error}=await sb.from('profiles').update({company:u.company}).eq('id',u.id);
+      if(error){errors++;console.error('company update failed',u.id,error);}
+      else{const m=allMembers.find(x=>x.id===u.id);if(m)m.company=u.company;}
+      done++;
+    }));
+    if(btn)btn.textContent=`更新中... (${done}/${updates.length})`;
+  }
+  if(btn){btn.disabled=false;btn.textContent='🏢 会社名を自動補完';}
+  renderMemberList();
+  alert(`✓ 会社名の自動補完完了\n更新成功: ${done-errors}名${errors?`\n失敗: ${errors}名 (コンソール参照)`:''}\nスキップ(既設定): ${skipped}名\n不一致: ${noData}名`);
 }
 
 window.saveMemberEdit=async function(){
