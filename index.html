@@ -289,6 +289,30 @@ function normCo(s){
     .replace(/株式会社|有限会社|合同会社|（株）|（有）|（合）|㈱|㈲/g,'')
     .replace(/[\s　・,，.。\-—–ー'"`]/g,'').toLowerCase();
 }
+// 氏名キー (空白除去)
+const nmKey=s=>String(s||'').replace(/[\s　]/g,'').trim();
+// ツール行 [{name, phone, <valKey>}] → {phoneMap, nameMap}。同名で値が割れる氏名は曖昧として nameMap から除外
+function buildToolMaps(rows,valKey){
+  const phoneMap={},nv={};
+  (rows||[]).forEach(r=>{const v=(r[valKey]||'').trim();if(!v)return;const p=normalizePhone(r.phone);if(p)phoneMap[p]=v;const n=nmKey(r.name);if(n)(nv[n]=nv[n]||new Set()).add(v);});
+  const nameMap={};
+  for(const n in nv)if(nv[n].size===1)nameMap[n]=[...nv[n]][0];
+  return {phoneMap,nameMap};
+}
+// workchat 内で重複する氏名 (同姓同名) の集合
+function workDupNames(){
+  const c={};(allMembers||[]).forEach(m=>{const n=nmKey(m.display_name);if(n)c[n]=(c[n]||0)+1;});
+  return new Set(Object.keys(c).filter(k=>c[k]>1));
+}
+// member を tool maps で解決。電話優先。同姓同名(dup)は名前一致を使わず電話必須
+function matchTool(m,maps,dup){
+  const p=normalizePhone(m.phone);
+  if(p&&maps.phoneMap[p])return maps.phoneMap[p];
+  const n=nmKey(m.display_name);
+  if(n&&!dup.has(n)&&maps.nameMap[n])return maps.nameMap[n];
+  return null;
+}
+
 // 対象者のインボイス番号を解決: 手入力(profiles.invoice_number)優先 → 無ければ会社名で会計マスタ照合
 function resolveInvoiceNo(prof,ym){
   if(!prof)return null;
@@ -1440,29 +1464,11 @@ window.closeMemberEdit=function(){
 };
 
 async function autoFillSites(){
-  if(!confirm('各ツール (新聞/アスクル/デリバリー) のデータから配属現場を自動補完します。\n\n対象: 配属現場が空欄のメンバーのみ (既設定者はスキップ)。\n\n続行しますか?'))return;
+  if(!confirm('各ツール (新聞/アスクル/デリバリー) のデータから配属現場を自動補完します。\n\n突合: 電話番号で照合。電話が無くても一意な氏名なら名前で補完(同姓同名は電話のみ)。\n対象: 配属現場が空欄のメンバーのみ (既設定者はスキップ)。\n\n続行しますか?'))return;
 
-  // 1. 3 つの RPC を並列に呼んで phone → site のマップを構築
-  // - NexPort: closed_pay_statements から営業所
-  // - askul: profiles + offices.name
-  // - delivery: profiles + clients.short_name (集約)
-  const askulRpc=async()=>{
-    const r=await fetch('https://erfcsnzdooswgpvgrapb.supabase.co/rest/v1/rpc/get_driver_site_map',{
-      method:'POST',headers:{'Content-Type':'application/json','apikey':ASKUL_ANON,'Authorization':'Bearer '+ASKUL_ANON},body:'{}',
-    });
-    if(!r.ok)return [];
-    return await r.json();
-  };
-  const deliveryRpc=async()=>{
-    const r=await fetch('https://ymdaakiwxkjotlmzveom.supabase.co/rest/v1/rpc/get_driver_site_map',{
-      method:'POST',headers:{'Content-Type':'application/json','apikey':DELIVERY_ANON,'Authorization':'Bearer '+DELIVERY_ANON},body:'{}',
-    });
-    if(!r.ok)return [];
-    return await r.json();
-  };
-  const nexportRpc=async()=>{
-    const {data}=await sb.rpc('get_shift_area_map');
-    return data||[];
+  // 3 ツールの RPC を並列取得 (各行: name, phone, area/site)
+  const toolRpc=async(base,anon)=>{
+    try{const r=await fetch(base+'/rest/v1/rpc/get_driver_site_map',{method:'POST',headers:{'Content-Type':'application/json','apikey':anon,'Authorization':'Bearer '+anon},body:'{}'});if(!r.ok)return [];return await r.json();}catch(_){return [];}
   };
 
   const btn=event?.target;
@@ -1470,30 +1476,30 @@ async function autoFillSites(){
 
   let shiftRows=[],askulRows=[],deliveryRows=[];
   try{
-    [shiftRows,askulRows,deliveryRows]=await Promise.all([nexportRpc(),askulRpc(),deliveryRpc()]);
+    [shiftRows,askulRows,deliveryRows]=await Promise.all([
+      sb.rpc('get_shift_area_map').then(({data})=>data||[]),
+      toolRpc('https://erfcsnzdooswgpvgrapb.supabase.co',ASKUL_ANON),
+      toolRpc('https://ymdaakiwxkjotlmzveom.supabase.co',DELIVERY_ANON),
+    ]);
   }catch(e){
     alert('取得失敗: '+e.message);
     if(btn){btn.disabled=false;btn.textContent='📥 ツールから自動補完';}
     return;
   }
 
-  // phone → site の各マップ (normalize 済み phone をキーに)
-  const shiftMap={},askulMap={},deliveryMap={};
-  shiftRows.forEach(r=>{const np=normalizePhone(r.phone);if(np&&r.area)shiftMap[np]=r.area;});
-  askulRows.forEach(r=>{const np=normalizePhone(r.phone);if(np&&r.site)askulMap[np]=r.site;});
-  deliveryRows.forEach(r=>{const np=normalizePhone(r.phone);if(np&&r.site)deliveryMap[np]=r.site;});
+  // 電話/一意氏名の両マップを構築 (同姓同名で値が割れる氏名は除外)
+  const sMaps=buildToolMaps(shiftRows,'area'), aMaps=buildToolMaps(askulRows,'site'), dMaps=buildToolMaps(deliveryRows,'site');
+  const dup=workDupNames();
 
-  // 各メンバーで合成
+  // 各メンバーで合成 (電話優先・同姓同名は名前一致しない)
   const updates=[];
   let noChange=0,skipped=0;
   for(const m of allMembers){
     if(m.site){skipped++;continue;}// 既設定はスキップ
-    if(!m.phone)continue;
-    const np=normalizePhone(m.phone);
     const parts=[];
-    if(shiftMap[np])parts.push('🗞'+shiftMap[np]);
-    if(askulMap[np])parts.push('📦'+askulMap[np]);
-    if(deliveryMap[np])parts.push('🚚'+deliveryMap[np]);
+    const s=matchTool(m,sMaps,dup); if(s)parts.push('🗞'+s);
+    const a=matchTool(m,aMaps,dup); if(a)parts.push('📦'+a);
+    const d=matchTool(m,dMaps,dup); if(d)parts.push('🚚'+d);
     if(parts.length===0){noChange++;continue;}
     updates.push({id:m.id,newSite:parts.join(' / ')});
   }
@@ -1557,14 +1563,13 @@ async function autoFillCompanies(){
     ]);
     rows=[...(a||[]),...(d||[])];
   }catch(e){alert('取得失敗: '+e.message);if(btn){btn.disabled=false;btn.textContent='🏢 会社名を自動補完';}return;}
-  const nm=s=>String(s||'').replace(/[\s　]/g,'').trim();
-  const byPhone={},byName={};
-  rows.forEach(r=>{const co=(r.company_name||'').trim();if(!co)return;const p=normalizePhone(r.phone);if(p)byPhone[p]=co;const n=nm(r.full_name);if(n)byName[n]=co;});
+  // RPCは name(full_name)/phone/company_name を返す → buildToolMaps で電話/一意氏名マップに
+  const maps=buildToolMaps(rows.map(r=>({name:r.full_name,phone:r.phone,company_name:r.company_name})),'company_name');
+  const dup=workDupNames();
   const updates=[];let skipped=0,noData=0;
   for(const m of allMembers){
     if(m.company){skipped++;continue;}
-    const p=normalizePhone(m.phone);
-    const co=(p&&byPhone[p])||byName[nm(m.display_name)];
+    const co=matchTool(m,maps,dup);// 電話優先・同姓同名は名前一致しない
     if(!co){noData++;continue;}
     updates.push({id:m.id,company:co});
   }
