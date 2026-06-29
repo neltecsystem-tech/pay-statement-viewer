@@ -201,7 +201,7 @@ table.detail tr.sat{background:#fef3c7;}
     </div>
     <div style="margin-bottom:10px;">
       <label style="display:block;font-size:12px;color:var(--text-sub);margin-bottom:4px;">会社</label>
-      <input type="text" id="mem-edit-company" class="input" style="width:100%;" placeholder="例: 株式会社○○ など" list="company-suggestions">
+      <input type="text" id="mem-edit-company" class="input" style="width:100%;" placeholder="例: 株式会社○○ など" list="company-suggestions" oninput="memUpdateInvoiceHint()">
       <datalist id="company-suggestions"></datalist>
     </div>
     <div style="margin-bottom:10px;">
@@ -210,7 +210,8 @@ table.detail tr.sat{background:#fef3c7;}
     </div>
     <div style="margin-bottom:10px;">
       <label style="display:block;font-size:12px;color:var(--text-sub);margin-bottom:4px;">🧾 インボイス登録番号 (T+13桁)</label>
-      <input type="text" id="mem-edit-invoice" class="input" style="width:100%;" placeholder="例: T1234567890123 (免税事業者は空欄)">
+      <input type="text" id="mem-edit-invoice" class="input" style="width:100%;" placeholder="空欄なら会社名から会計マスタを自動参照" oninput="memUpdateInvoiceHint()">
+      <div id="mem-edit-invoice-auto" style="display:none;font-size:11px;margin-top:4px;padding:6px 8px;background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;color:#155e75;"></div>
     </div>
     <div style="margin-bottom:10px;">
       <label style="display:block;font-size:12px;color:var(--text-sub);margin-bottom:4px;">📍 配属現場</label>
@@ -1410,6 +1411,23 @@ function renderMemberList(){
   }
 }
 
+// 編集モーダル: インボイス番号の自動取得状況を表示 (手入力が無ければ会社名で会計マスタ照合)
+function memUpdateInvoiceHint(){
+  const el=$('mem-edit-invoice-auto');if(!el)return;
+  const manual=normInvoiceNo(($('mem-edit-invoice')||{}).value);
+  if(manual){el.style.display='none';return;}// 手入力があれば自動参照は使わない
+  const company=(($('mem-edit-company')||{}).value||'').trim();
+  if(!company){el.style.display='none';return;}
+  const now=new Date();const ym=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const res=resolveInvoiceNo({invoice_number:null,company},ym);
+  if(res){
+    el.innerHTML=`🧾 会計マスタより自動取得: <b>${escHtml(res.no)}</b><br><span style="color:#0e7490;">会社名「${escHtml(company)}」で照合。手入力しなくても明細に自動表示されます。</span>`;
+  }else{
+    el.innerHTML=`<span style="color:#b45309;">会社名「${escHtml(company)}」は会計マスタにT番号が見つかりません（免税/未登録、または会社名の表記ゆれ）。手入力も可能です。</span>`;
+  }
+  el.style.display='block';
+}
+
 window.openMemberEdit=async function(id){
   const p=allMembers.find(m=>m.id===id);
   if(!p){alert('メンバーが見つかりません');return;}
@@ -1420,6 +1438,7 @@ window.openMemberEdit=async function(id){
   $('mem-edit-position').value=p.position||'';
   $('mem-edit-invoice').value=p.invoice_number||'';
   $('mem-edit-site').value=p.site||'';
+  memUpdateInvoiceHint();
   $('mem-edit-owner').checked=!!p.is_company_owner;
   // 既に登録済みの site 値を datalist のサジェストに反映
   const uniqueSites=[...new Set(allMembers.map(m=>m.site).filter(Boolean))].sort();
