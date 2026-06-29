@@ -508,8 +508,9 @@ async function searchByName(query){
 
 window.toggleOwner=async function(profileId,newValue){
   if(!confirm(newValue?'この人を法人オーナーに設定しますか?\n→ 自分の支払明細を見られるようになります':'オーナー設定を解除しますか?\n→ 法人ドライバー扱いになり、自分の金額は見られなくなります'))return;
-  const {error}=await sb.from('profiles').update({is_company_owner:newValue}).eq('id',profileId);
+  const {data:ud,error}=await sb.from('profiles').update({is_company_owner:newValue}).eq('id',profileId).select('id');
   if(error){alert('更新失敗: '+error.message);return;}
+  if(!ud||!ud.length){alert('更新できませんでした（権限不足の可能性）');return;}
   // 直近の検索を再実行して反映
   if($('admin-name-input').value.trim())await searchByName($('admin-name-input').value.trim());
   // 現在表示中の人なら targetProfile も更新
@@ -1527,8 +1528,8 @@ async function autoFillSites(){
   for(let i=0;i<updates.length;i+=10){
     const batch=updates.slice(i,i+10);
     await Promise.all(batch.map(async u=>{
-      const {error}=await sb.from('profiles').update({site:u.newSite}).eq('id',u.id);
-      if(error){errors++;console.error('update failed for',u.id,error);}
+      const {data,error}=await sb.from('profiles').update({site:u.newSite}).eq('id',u.id).select('id');
+      if(error||!data||!data.length){errors++;console.error('update failed/blocked for',u.id,error);}
       else{
         const m=allMembers.find(x=>x.id===u.id);
         if(m)m.site=u.newSite;
@@ -1582,8 +1583,8 @@ async function autoFillCompanies(){
   for(let i=0;i<updates.length;i+=10){
     const batch=updates.slice(i,i+10);
     await Promise.all(batch.map(async u=>{
-      const {error}=await sb.from('profiles').update({company:u.company}).eq('id',u.id);
-      if(error){errors++;console.error('company update failed',u.id,error);}
+      const {data,error}=await sb.from('profiles').update({company:u.company}).eq('id',u.id).select('id');
+      if(error||!data||!data.length){errors++;console.error('company update failed/blocked',u.id,error);}
       else{const m=allMembers.find(x=>x.id===u.id);if(m)m.company=u.company;}
       done++;
     }));
@@ -1618,8 +1619,9 @@ window.saveMemberEdit=async function(){
     is_company_owner:$('mem-edit-owner').checked,
   };
   btn.disabled=true;btn.textContent='保存中...';
-  const {error}=await sb.from('profiles').update(updates).eq('id',id);
+  const {data:upd,error}=await sb.from('profiles').update(updates).eq('id',id).select('id');
   if(error){btn.disabled=false;btn.textContent='保存';err.textContent='保存失敗: '+error.message;err.style.display='block';return;}
+  if(!upd||!upd.length){btn.disabled=false;btn.textContent='保存';err.textContent='保存できませんでした（権限不足の可能性）。管理者権限を確認してください。';err.style.display='block';return;}
 
   // 差引項目を保存: 既存全削除 + 新規一括 insert (シンプル化)
   const rows=Array.from(document.querySelectorAll('#mem-edit-deductions .dedu-row'));
