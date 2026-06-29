@@ -279,6 +279,26 @@ function normInvoiceNo(s){
 }
 function isValidInvoiceNo(t){return t===''||/^T\d{13}$/.test(t);}
 
+// 会計ツール「適格請求書マスタ(取引先)」のキャッシュ。会社名でT番号を引く
+let invPartners=[];// [{name, invoice_number, registered, effective_from}]
+// 会社名/取引先名の表記ゆれ吸収 (株式会社・合同会社・記号・空白を除去)
+function normCo(s){
+  return String(s||'')
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0))
+    .replace(/株式会社|有限会社|合同会社|（株）|（有）|（合）|㈱|㈲/g,'')
+    .replace(/[\s　・,，.。\-—–ー'"`]/g,'').toLowerCase();
+}
+// 対象者のインボイス番号を解決: 手入力(profiles.invoice_number)優先 → 無ければ会社名で会計マスタ照合
+function resolveInvoiceNo(prof,ym){
+  if(!prof)return null;
+  if(prof.invoice_number)return {no:prof.invoice_number,src:'手入力'};
+  const co=normCo(prof.company);
+  if(!co)return null;
+  const hit=invPartners.find(p=>normCo(p.name)===co && (!p.effective_from || String(p.effective_from).slice(0,7)<=(ym||'9999-99')));
+  if(hit)return {no:hit.invoice_number,src:'会計マスタ'};
+  return null;
+}
+
 // 本人が自分のインボイス登録番号を登録/変更
 window.editMyInvoice=async function(){
   if(!profile)return;
@@ -324,6 +344,8 @@ async function postLogin(){
     return doLogout();
   }
   profile=data;
+  // 会計ツールの適格請求書マスタ(取引先→T番号)を取得 (会社名でのライブ参照用)
+  try{const {data:ip}=await sb.rpc('get_invoice_partner_numbers');invPartners=ip||[];}catch(_){invPartners=[];}
   $('screen-login').style.display='none';
   $('screen-main').style.display='block';
   $('hdr-user').textContent=`${profile.display_name||session.user.email}${(profile.role==='admin'||profile.role==='super_admin')?' (管理者)':''}`;
@@ -556,10 +578,12 @@ function renderResults({shift,askul,delivery,deductions,ym,phone}){
     }
   }
 
-  // 適格請求書 登録番号 (支払先=本人の事業者登録番号)
+  // 適格請求書 登録番号 (手入力優先 / 無ければ会社名で会計マスタから自動取得)
   if(foundCount>0){
-    const inv=(targetProfile&&targetProfile.invoice_number)||'';
-    const invHtml=inv?escHtml(inv):'<span style="color:var(--text-sub);font-weight:400;">未登録（免税事業者）</span>';
+    const res=resolveInvoiceNo(targetProfile,ym);
+    const invHtml=res
+      ?`${escHtml(res.no)} <span style="font-size:11px;color:var(--text-sub);font-weight:400;">(${res.src})</span>`
+      :'<span style="color:var(--text-sub);font-weight:400;">未登録（免税事業者 / 会社名未設定）</span>';
     html+=`<div class="card" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
       <span style="font-size:12px;color:var(--text-sub);">🧾 適格請求書 登録番号</span>
       <span style="font-size:13px;font-weight:600;font-family:monospace;">${invHtml}</span>
@@ -890,7 +914,7 @@ function buildSummaryHtml(){
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
       <div style="flex:1;padding-right:24px;">
         <div style="font-size:20px;font-weight:700;border-bottom:1.5px solid #111;padding-bottom:4px;display:inline-block;min-width:230px;">${escHtml(owner)}<span style="font-size:14px;font-weight:400;margin-left:24px;">様</span></div>
-        ${(targetProfile&&targetProfile.invoice_number)?`<div style="font-size:11px;color:#374151;margin-top:4px;">登録番号：${escHtml(targetProfile.invoice_number)}</div>`:''}
+        ${(()=>{const res=resolveInvoiceNo(targetProfile,ym);return res?`<div style="font-size:11px;color:#374151;margin-top:4px;">登録番号：${escHtml(res.no)}</div>`:'';})()}
         <div style="font-size:12px;margin-top:14px;">下記のとおりお支払い申し上げます。</div>
         <div style="display:flex;align-items:flex-end;gap:18px;margin-top:18px;">
           <div style="font-size:14px;font-weight:600;">お支払額</div>
