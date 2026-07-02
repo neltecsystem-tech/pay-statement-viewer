@@ -1373,6 +1373,7 @@ function renderMemberList(){
         </div>
       </div>
       <div style="font-size:12px;font-family:monospace;color:var(--text-sub);white-space:nowrap;">${phoneStr}</div>
+      ${p.phone?`<button class="btn" style="padding:6px 10px;font-size:12px;" onclick="viewMemberStatement('${escHtml(p.id)}')" title="この人の支払明細を表示">📄 明細</button>`:''}
       <button class="btn-ghost" onclick="openMemberEdit('${escHtml(p.id)}')">編集</button>
     </div>`;
   };
@@ -1433,6 +1434,21 @@ function memUpdateInvoiceHint(){
   }
   el.style.display='block';
 }
+
+// 管理者: メンバー一覧から任意の人の支払明細を表示 (明細ビューア画面へ切替)
+window.viewMemberStatement=function(id){
+  const m=allMembers.find(x=>x.id===id);
+  if(!m){alert('メンバーが見つかりません');return;}
+  if(!m.phone){alert(`${m.display_name||'この人'} は電話番号が未登録のため明細を表示できません。\n先に「編集」から電話番号を登録してください。`);return;}
+  const phone=normalizePhone(m.phone);
+  // 明細ビューアに戻り、管理者検索モードをONにしてこの人を表示
+  closeAdminScreen();
+  $('admin-mode-cb').checked=true;
+  toggleAdminMode();
+  $('admin-name-input').value=m.display_name||'';
+  $('admin-phone-input').value=m.phone;
+  loadFor(phone);
+};
 
 window.openMemberEdit=async function(id){
   const p=allMembers.find(m=>m.id===id);
