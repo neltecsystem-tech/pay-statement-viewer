@@ -884,110 +884,91 @@ async function renderToPdfBlob(html){
 
 // NELTEC 角印 (base64 埋め込み: html2canvas で確実に描画)
 const STAMP_DATA_URI="data:image/png;base64,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";
-// ----- サマリーPDF (支払通知書フォーマット: サンプル準拠) -----
+// ----- サマリーPDF (支払通知書フォーマット: 支払通知書.docx ひな型準拠) -----
 function buildSummaryHtml(){
   if(!currentData)return '';
   const {shift,askul,delivery,ym}=currentData;
   const [y,m]=ym.split('-').map(Number);
   const fmtNum=n=>Math.round(Number(n)||0).toLocaleString();
-  const total=calcTotal(currentData);
-  const shiftTotal=(shift?.statements||[]).reduce((s,r)=>s+(shouldHide(r,'shift')?0:(r.grand_total||0)),0);
-  const askulTotal=(askul?.statements||[]).reduce((s,r)=>s+(shouldHide(r,'askul')?0:(r.payment_amount||0)),0);
-  const deliveryTotal=(delivery?.statements||[]).reduce((s,r)=>s+(shouldHide(r,'delivery')?0:(r.payment_amount||0)),0);
-  const shiftHidden=(shift?.statements||[]).some(r=>shouldHide(r,'shift'));
-  const askulHidden=(askul?.statements||[]).some(r=>shouldHide(r,'askul'));
-  const deliveryHidden=(delivery?.statements||[]).some(r=>shouldHide(r,'delivery'));
+  const yen=n=>'￥'+fmtNum(n);
   const owner=ownerName();
-  // 車両リース料などの控除はビューアに未連携 (将来 NELTEC 会計から連携)
-  const lease=Number(currentData.vehicle_lease||0);
-  const subtotal=total+lease;       // 小計 = お支払額 + 車両リース料
-  const payAmount=total;            // お支払額 / 合計金額
-  // 振込先 (将来 NELTEC 会計の口座情報を連携。今は任意フィールド or 空欄)
-  const bank=currentData.bank_account||targetProfile?.bank_account||'';
+  // 金額: ツール合計 − 差引項目(貸付金返済等)= 合計金額(=お支払額)
+  const toolTotal=calcTotal(currentData);
+  const deds=(currentData.deductions||[]).filter(d=>d.active);
+  const deductionTotal=deds.reduce((s,d)=>s+(Number(d.amount)||0),0);
+  const payAmount=toolTotal-deductionTotal;   // お支払額 / 合計金額
+  // 営業所名: profiles.site → 無ければ新聞シフトの主稼働エリア
+  const office=(targetProfile?.site||'').trim()||(shift?.statements?.[0]?.primary_area||'').trim()||'—';
   const mgmtNo=`N-${y}${String(m).padStart(2,'0')}`;
   const issueDate=`${new Date().getFullYear()}年${new Date().getMonth()+1}月${new Date().getDate()}日`;
-
-  // 摘要テーブル行 (ツールごと)。先頭行のみ ドライバー/年月 を表示
+  const inv=resolveInvoiceNo(targetProfile,ym);
+  // 契約ツール一覧 (詳細=別紙のとおり の補足)
   const tools=[];
-  if((shift?.statements||[]).length)   tools.push({label:'新聞シフト 配達業務委託',total:shiftTotal,hidden:shiftHidden});
-  if((askul?.statements||[]).length)   tools.push({label:'ASKUL LOGIST 配送業務委託',total:askulTotal,hidden:askulHidden});
-  if((delivery?.statements||[]).length)tools.push({label:'デリバリー 配送業務委託',total:deliveryTotal,hidden:deliveryHidden});
-  const MIN_ROWS=7;
-  let tbody='';
-  for(let i=0;i<Math.max(MIN_ROWS,tools.length);i++){
-    const t=tools[i];
-    const zebra=i%2===1?'#f8fafc':'#fff';
-    const cell='border-bottom:1px solid #e5e7eb;padding:9px 10px;font-size:12px;';
-    if(t){
-      tbody+=`<tr style="background:${zebra};">
-        <td style="${cell}text-align:center;">${i===0?escHtml(owner):''}</td>
-        <td style="${cell}text-align:center;white-space:nowrap;">${i===0?escHtml(eraLabel(y,m)):''}</td>
-        <td style="${cell}">${escHtml(t.label)}${i===0?'<div style="font-size:10px;color:#6b7280;margin-top:2px;">詳細は別紙のとおり</div>':''}</td>
-        <td style="${cell}text-align:right;font-weight:600;">${t.hidden?'非表示':fmtNum(t.total)}</td>
-      </tr>`;
-    }else{
-      tbody+=`<tr style="background:${zebra};"><td style="${cell}">&nbsp;</td><td style="${cell}"></td><td style="${cell}"></td><td style="${cell}"></td></tr>`;
-    }
-  }
+  if((shift?.statements||[]).length)   tools.push('新聞シフト 配達業務委託');
+  if((askul?.statements||[]).length)   tools.push('ASKUL LOGIST 配送業務委託');
+  if((delivery?.statements||[]).length)tools.push('デリバリー 配送業務委託');
 
-  const bar='background:#111;height:14px;';
-  return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans','Hiragino Kaku Gothic Pro',sans-serif;color:#111;padding:30px 40px 36px;">
-    <div style="${bar}margin-bottom:18px;"></div>
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;">
-      <h1 style="margin:0;font-size:30px;font-weight:800;letter-spacing:6px;">支払通知書</h1>
-      <div style="text-align:right;font-size:12px;line-height:1.8;">
-        <div>${issueDate}</div>
+  const line='border-bottom:1px solid #111;';
+  // 支払内容 テーブル (ラベル+値の2列)
+  const rowKv=(label,val)=>`<tr>
+    <td style="width:110px;padding:8px 12px;font-size:12px;background:#f3f4f6;border:1px solid #d1d5db;font-weight:600;white-space:nowrap;">${label}</td>
+    <td style="padding:8px 12px;font-size:12px;border:1px solid #d1d5db;">${val}</td></tr>`;
+  const detail='別紙のとおり'+(tools.length?`<span style="font-size:10px;color:#6b7280;">（${tools.map(escHtml).join(' / ')}）</span>`:'');
+  // 金額内訳 テーブル
+  const dedRows=deds.map(d=>`<tr>
+    <td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">${escHtml(d.label||'差引')}</td>
+    <td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;color:#b91c1c;min-width:120px;">▲${yen(d.amount)}</td></tr>`).join('');
+
+  return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans','Hiragino Kaku Gothic Pro',sans-serif;color:#111;padding:34px 42px 30px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+      <h1 style="margin:0;font-size:30px;font-weight:800;letter-spacing:8px;">支払通知書</h1>
+      <div style="text-align:right;font-size:12px;line-height:1.9;">
+        <div>発行日：${issueDate}</div>
         <div>管理番号：${escHtml(mgmtNo)}</div>
       </div>
     </div>
 
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
-      <div style="flex:1;padding-right:24px;">
-        <div style="font-size:20px;font-weight:700;border-bottom:1.5px solid #111;padding-bottom:4px;display:inline-block;min-width:230px;">${escHtml(owner)}<span style="font-size:14px;font-weight:400;margin-left:24px;">様</span></div>
-        ${(()=>{const res=resolveInvoiceNo(targetProfile,ym);return res?`<div style="font-size:11px;color:#374151;margin-top:4px;">登録番号：${escHtml(res.no)}</div>`:'';})()}
-        <div style="font-size:12px;margin-top:14px;">下記のとおりお支払い申し上げます。</div>
-        <div style="display:flex;align-items:flex-end;gap:18px;margin-top:18px;">
-          <div style="font-size:14px;font-weight:600;">お支払額</div>
-          <div style="font-size:26px;font-weight:800;letter-spacing:1px;">${fmtNum(payAmount)}</div>
-        </div>
-      </div>
-      <div style="position:relative;width:250px;font-size:12px;line-height:1.85;padding-top:2px;">
-        <div style="font-weight:700;">株式会社ＮＥＬＴＥＣ</div>
-        <div>〒170-0005</div>
-        <div>東京都豊島区南大塚2-38-1</div>
-        <div>リードシー大塚ビル5F-7号室</div>
-        <div>TEL: 090-9295-0785</div>
-        <div>FAX: 03-4243-3498</div>
-        <img src="${STAMP_DATA_URI}" alt="印" style="position:absolute;top:-6px;right:0;width:74px;height:74px;" />
-      </div>
+    <div style="margin-bottom:6px;">
+      <div style="font-size:20px;font-weight:700;border-bottom:1.5px solid #111;padding-bottom:4px;display:inline-block;min-width:260px;">${escHtml(owner)}<span style="font-size:14px;font-weight:400;margin-left:24px;">様</span></div>
+      ${inv?`<div style="font-size:11px;color:#374151;margin-top:4px;">登録番号：${escHtml(inv.no)}</div>`:''}
+    </div>
+    <div style="font-size:12px;margin:12px 0 16px;">下記のとおりお支払い申し上げますので、ご確認くださいますようお願い申し上げます。</div>
+
+    <div style="display:flex;align-items:center;gap:16px;background:#f8fafc;border:1px solid #111;border-radius:4px;padding:12px 18px;margin-bottom:20px;">
+      <div style="font-size:15px;font-weight:700;letter-spacing:2px;">お支払額</div>
+      <div style="font-size:28px;font-weight:800;letter-spacing:1px;flex:1;text-align:right;">${yen(payAmount)}</div>
     </div>
 
-    <div style="${bar}margin:6px 0 0;"></div>
-    <table style="width:100%;border-collapse:collapse;">
-      <thead><tr>
-        <th style="padding:8px 10px;font-size:12px;border-bottom:1.5px solid #111;text-align:center;width:20%;">ドライバー</th>
-        <th style="padding:8px 10px;font-size:12px;border-bottom:1.5px solid #111;text-align:center;width:16%;">年月</th>
-        <th style="padding:8px 10px;font-size:12px;border-bottom:1.5px solid #111;text-align:left;">摘要</th>
-        <th style="padding:8px 10px;font-size:12px;border-bottom:1.5px solid #111;text-align:right;width:18%;">金額</th>
-      </tr></thead>
-      <tbody>${tbody}</tbody>
+    <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">支払内容</div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:18px;">
+      ${rowKv('ドライバー',escHtml(owner))}
+      ${rowKv('年月',escHtml(eraLabel(y,m)))}
+      ${rowKv('営業所',escHtml(office))}
+      ${rowKv('詳細',detail)}
     </table>
 
-    <div style="${bar}margin:0 0 12px;"></div>
-    <div style="display:flex;justify-content:flex-end;">
-      <table style="border-collapse:collapse;font-size:13px;min-width:300px;">
-        <tr><td style="padding:4px 14px;text-align:right;color:#374151;">小計</td><td style="padding:4px 6px;text-align:right;font-weight:600;min-width:110px;">${fmtNum(subtotal)}</td></tr>
-        <tr><td style="padding:4px 14px;text-align:right;color:#374151;">車両リース料</td><td style="padding:4px 6px;text-align:right;font-weight:600;">${lease?('-'+fmtNum(lease)):'0'}</td></tr>
+    <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">金額内訳</div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:18px;">
+      <table style="border-collapse:collapse;font-size:13px;min-width:320px;">
+        <tr><td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">金額</td><td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;min-width:120px;">${yen(toolTotal)}</td></tr>
+        <tr><td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;border-top:1px solid #e5e7eb;">小計</td><td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;border-top:1px solid #e5e7eb;">${yen(toolTotal)}</td></tr>
+        ${dedRows}
+        <tr><td style="padding:8px 14px;text-align:right;font-weight:700;${line}border-top:2px solid #111;">合計金額</td><td style="padding:8px 6px;text-align:right;font-weight:800;font-size:16px;${line}border-top:2px solid #111;">${yen(payAmount)}</td></tr>
       </table>
     </div>
 
-    <div style="border-top:1px solid #111;margin:8px 0 0;"></div>
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;">
-      <div style="font-size:11px;color:#374151;">＊お振込手数料はご負担をお願い致します</div>
-      <div style="display:flex;align-items:center;gap:24px;"><div style="font-size:14px;font-weight:700;">合計金額</div><div style="font-size:20px;font-weight:800;min-width:120px;text-align:right;">${fmtNum(payAmount)}</div></div>
+    <div style="font-size:11px;color:#374151;line-height:1.9;margin-bottom:22px;">
+      <div>＊振込手数料は弊社負担</div>
+      <div>＊記載内容に相違がある場合は、３営業日以内にご連絡ください</div>
     </div>
-    <div style="border-top:1px solid #111;margin:0 0 8px;"></div>
-    <div style="text-align:center;font-size:12px;padding:6px 0 14px;">振込先 / ${bank?escHtml(bank):'<span style="color:#9ca3af;">（NELTEC会計の口座情報を連携予定）</span>'}</div>
+
+    <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">発行元</div>
+    <div style="position:relative;font-size:12px;line-height:1.9;border:1px solid #d1d5db;border-radius:4px;padding:12px 18px;">
+      <div><span style="display:inline-block;width:66px;color:#6b7280;">会社名</span>株式会社ＮＥＬＴＥＣ</div>
+      <div><span style="display:inline-block;width:66px;color:#6b7280;vertical-align:top;">所在地</span>〒170-0005 東京都豊島区南大塚2-38-1<br><span style="display:inline-block;width:66px;"></span>REID-C大塚ビル 5階</div>
+      <div><span style="display:inline-block;width:66px;color:#6b7280;">登録番号</span>T8011601022911</div>
+      <img src="${STAMP_DATA_URI}" alt="印" style="position:absolute;top:8px;right:18px;width:72px;height:72px;" />
+    </div>
   </div>`;
 }
 
