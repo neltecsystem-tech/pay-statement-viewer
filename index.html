@@ -494,38 +494,20 @@ async function searchByName(query){
   const results=$('admin-name-results');
   results.style.display='block';
   results.innerHTML='<div style="padding:10px;color:var(--text-sub);font-size:12px;"><span class="spinner"></span> 検索中...</div>';
-  // 管理者は電話番号未登録者も表示 (氏名照合で明細取得)。名前 と 会社名 の両方で検索。
-  const SEL='id, display_name, phone, role, company, position, is_company_owner, invoice_number';
-  const [r1,r2]=await Promise.all([
-    sb.from('profiles').select(SEL).ilike('display_name','%'+query+'%').limit(50),
-    sb.from('profiles').select(SEL).ilike('company','%'+query+'%').limit(300),
-  ]);
-  const err=r1.error||r2.error;
-  if(err&&!(r1.data||r2.data)){results.innerHTML=`<div style="padding:10px;color:var(--danger);font-size:12px;">検索エラー: ${escHtml(err.message)}</div>`;return;}
-  const byId=new Map();
-  [...(r1.data||[]),...(r2.data||[])].forEach(p=>byId.set(p.id,p));
-  const data=[...byId.values()];
-  // 会社候補: 検索語に一致する会社名を集約 (会社→メンバー一覧を保持し、再クエリせず確実に束ねる)
-  const compMembers=new Map();
-  (r2.data||[]).forEach(p=>{ if(p.company){ if(!compMembers.has(p.company))compMembers.set(p.company,[]); compMembers.get(p.company).push(p);} });
-  const companies=[...compMembers.entries()].map(([co,mem])=>[co,mem.length]);
-  window._searchCompanies=companies.map(c=>c[0]);
-  window._searchCompanyMembers=compMembers;
-  if(!data.length&&!companies.length){
-    results.innerHTML=`<div style="padding:10px;color:var(--text-sub);font-size:12px;">該当者なし</div>`;
-    return;
-  }
-  window._searchRes=data;
+  // 個人は氏名で検索。法人は「会社名でまとめる」候補から現場ツール(新聞/アスクル/デリバリー)横断で集計。
+  const {data,error}=await sb.from('profiles').select('id, display_name, phone, role, company, position, is_company_owner, invoice_number').ilike('display_name','%'+query+'%').limit(50);
+  if(error){results.innerHTML=`<div style="padding:10px;color:var(--danger);font-size:12px;">検索エラー: ${escHtml(error.message)}</div>`;return;}
+  window._searchRes=data||[];
   const canEditOwner=profile?.role==='super_admin';
-  // 会社(法人)候補を先頭に表示: クリックで会社の全員分をまとめて表示
-  const companyHtml=companies.map(([co,cnt],i)=>`<div onclick="pickCompany(${i})" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#eff6ff;" onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
+  // 会社(法人)候補: 入力語を会社名として現場ツール横断で集計 (複数現場にまたがる業者を統合)
+  const companyHtml=`<div onclick="pickCompany()" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#eff6ff;" onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
       <div>
-        <div style="font-weight:700;font-size:13px;color:#1e40af;">🏢 ${escHtml(co)} <span style="background:#dbeafe;color:#1e40af;padding:1px 7px;border-radius:8px;font-size:10px;">法人</span></div>
-        <div style="font-size:11px;color:#3b82f6;margin-top:2px;">会社名が登録された ${cnt}名 をまとめて表示</div>
+        <div style="font-weight:700;font-size:13px;color:#1e40af;">🏢 「${escHtml(query)}」を法人としてまとめて表示 <span style="background:#dbeafe;color:#1e40af;padding:1px 7px;border-radius:8px;font-size:10px;">法人</span></div>
+        <div style="font-size:11px;color:#3b82f6;margin-top:2px;">新聞・アスクル・デリバリー横断で、会社名にこの語を含む支払を合計</div>
       </div>
-      <div style="font-size:12px;font-weight:700;color:#1e40af;white-space:nowrap;">全員を表示 ▶</div>
-    </div>`).join('');
-  results.innerHTML=companyHtml+data.map(p=>{
+      <div style="font-size:12px;font-weight:700;color:#1e40af;white-space:nowrap;">法人集計 ▶</div>
+    </div>`;
+  const personHtml=(data||[]).map(p=>{
     const sub=[p.company,p.position].filter(Boolean).join(' / ');
     const adminTag=(p.role==='admin'||p.role==='super_admin')?'<span style="background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">管理者</span>':'';
     const ownerTag=p.is_company_owner?'<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">👑 オーナー</span>':'';
@@ -544,6 +526,7 @@ async function searchByName(query){
       </div>
     </div>`;
   }).join('');
+  results.innerHTML=companyHtml+((data&&data.length)?personHtml:`<div style="padding:10px;color:var(--text-sub);font-size:12px;">該当する個人はいません（法人の場合は上の「🏢 法人としてまとめて表示」を押してください）</div>`);
 }
 
 window.toggleOwner=async function(profileId,newValue){
@@ -571,12 +554,12 @@ window.pickMember=function(id){
   loadFor(ph, p.display_name||'', p);
 };
 
-// 各ツールEFを叩いて {shift,askul,delivery} を返す (レンダリングはしない)。会社集計で1人ずつ使用。
-async function fetchTools(phone, name, ym){
+// 各ツールEFを叩いて {shift,askul,delivery} を返す。phone/name/company いずれかで照合。
+async function fetchTools(phone, name, company, ym){
   const userJwt=session?.access_token||'';
   const callEf=async (url,anon)=>{
     try{
-      const resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+anon},body:JSON.stringify({phone,name:name||'',year_month:ym,auth_token:userJwt})});
+      const resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+anon},body:JSON.stringify({phone:phone||'',name:name||'',company:company||'',year_month:ym,auth_token:userJwt})});
       if(!resp.ok)return {error:`HTTP ${resp.status}`,code:resp.status};
       return await resp.json();
     }catch(e){return {error:e.message};}
@@ -585,84 +568,64 @@ async function fetchTools(phone, name, ym){
   return {shift,askul,delivery};
 }
 
-// 会社(法人)候補を選択 → その会社の全員分を集計表示
-window.pickCompany=function(idx){
-  const co=(window._searchCompanies||[])[idx];
-  if(!co)return;
+// 法人(会社名)を選択 → 現場3ツール横断で、会社名にこの語を含む支払を集計表示
+window.pickCompany=function(){
+  const q=$('admin-name-input').value.trim();
+  if(!q){alert('会社名(法人名)を入力してください');return;}
   $('admin-name-results').style.display='none';
-  const members=(window._searchCompanyMembers&&window._searchCompanyMembers.get(co))||null;
-  loadCompany(co, members);
+  loadCompany(q);
 };
 
-let _companyMembers=[];
-async function loadCompany(company, preMembers){
+async function loadCompany(company){
   const ym=$('ym-input').value;
   if(!ym){alert('対象月を選択してください');return;}
   const area=$('result-area');
-  area.innerHTML='<div class="card center"><div class="spinner"></div> 会社の全員分を集計中...</div>';
+  area.innerHTML=`<div class="card center"><div class="spinner"></div> 「${escHtml(company)}」の法人集計中（新聞・アスクル・デリバリー横断）...</div>`;
   $('btn-summary-pdf').disabled=true; $('btn-all-pdf').disabled=true; currentData=null;
-  // 検索時に取得済みのメンバーを優先(再クエリ不要・確実)。無ければ会社名で再検索。
-  let members=preMembers;
-  if(!members||!members.length){
-    const {data,error}=await sb.from('profiles').select('id, display_name, phone, role, company, is_company_owner, invoice_number').ilike('company',company);
-    if(error){area.innerHTML=`<div class="card" style="color:var(--danger);">会社メンバー取得エラー: ${escHtml(error.message)}</div>`;return;}
-    members=data||[];
-  }
-  if(!members.length){area.innerHTML=`<div class="card">「${escHtml(company)}」の会社メンバーが見つかりません（会社名の登録が必要です）</div>`;return;}
-  members=members.slice().sort((a,b)=>String(a.display_name||'').localeCompare(String(b.display_name||''),'ja'));
-  _companyMembers=members;
-  const rows=await Promise.all(members.map(async m=>{
-    const ph=normalizePhone(m.phone||'');
-    const tools=await fetchTools(ph, ph?'':(m.display_name||''), ym);
-    const {data:deds}=await sb.from('member_deductions').select('amount,active').eq('profile_id',m.id).eq('active',true);
-    const dedTotal=(deds||[]).reduce((s,d)=>s+(Number(d.amount)||0),0);
-    const toolTotal=calcTotal(tools);
-    return {m,toolTotal,dedTotal,payable:toolTotal-dedTotal,foundCount:[tools.shift,tools.askul,tools.delivery].filter(x=>x&&x.found).length};
-  }));
-  renderCompany(company, ym, rows);
+  const tools=await fetchTools('', '', company, ym);
+  renderCompanyAgg(company, ym, tools);
 }
 
-function renderCompany(company, ym, rows){
-  const total=rows.reduce((s,r)=>s+r.payable,0);
-  const withData=rows.filter(r=>r.foundCount>0).length;
+function renderCompanyAgg(company, ym, tools){
+  // 各ツールの支払先(法人配下ドライバー)を横断で集約
+  const payees=[];
+  (tools.shift&&tools.shift.statements||[]).forEach(s=>payees.push({tool:'新聞シフト',color:'#0ea5e9',name:s.staff_name,amount:Number(s.grand_total)||0,sub:s.primary_area||''}));
+  (tools.askul&&tools.askul.statements||[]).forEach(s=>payees.push({tool:'アスクル',color:'#f97316',name:s.driver_name,amount:Number(s.payment_amount)||0,sub:s.company_name||''}));
+  (tools.delivery&&tools.delivery.statements||[]).forEach(s=>payees.push({tool:'デリバリー',color:'#10b981',name:s.driver_name,amount:Number(s.payment_amount)||0,sub:s.company_name||''}));
+  const total=payees.reduce((a,p)=>a+p.amount,0);
+  const errs=[['新聞',tools.shift],['アスクル',tools.askul],['デリバリー',tools.delivery]].filter(([_,t])=>t&&t.error).map(([n])=>n);
+  const byTool={};
+  payees.forEach(p=>{ (byTool[p.tool]=byTool[p.tool]||{color:p.color,items:[],sum:0}); byTool[p.tool].items.push(p); byTool[p.tool].sum+=p.amount; });
+
   let html=`<div class="grand-total-card">
-    <div class="label">🏢 ${escHtml(company)} · ${rows.length}名 / ${escHtml(ym)} 会社合計支払額</div>
+    <div class="label">🏢 ${escHtml(company)} / ${escHtml(ym)} 会社合計支払額（3ツール横断）</div>
     <div class="value">${fmtYen(total)}</div>
-    <div style="font-size:11px;color:#92400e;margin-top:6px;">明細あり ${withData}名 / 全${rows.length}名</div>
+    <div style="font-size:11px;color:#92400e;margin-top:6px;">支払先 ${payees.length}件 ${errs.length?`／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
   </div>`;
-  html+=`<div class="card" style="padding:0;overflow:hidden;">`;
-  rows.forEach(r=>{
-    const name=r.m.display_name||'(名前未設定)';
-    const ownerTag=r.m.is_company_owner?'<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">👑</span>':'';
-    const noPhone=r.m.phone?'':'<span style="font-size:10px;color:#b45309;background:#fef3c7;border-radius:8px;padding:1px 6px;margin-left:6px;">電話未登録</span>';
-    const dedLine=r.dedTotal?`<span style="color:var(--warning);font-size:11px;"> (差引 -${fmtYen(r.dedTotal)})</span>`:'';
-    const info=r.foundCount>0?`${r.foundCount}ツール`:'明細なし';
-    html+=`<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;">
-      <div>
-        <div style="font-weight:600;font-size:13px;">${escHtml(name)}${ownerTag}${noPhone}</div>
-        <div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${info}${dedLine}</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <div style="font-weight:700;font-size:15px;">${fmtYen(r.payable)}</div>
-        <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="loadMemberById('${escHtml(r.m.id)}')">詳細</button>
-      </div>
-    </div>`;
-  });
-  html+='</div>';
-  html+=`<div class="card" style="font-size:11px;color:var(--text-sub);line-height:1.7;">※ 会社名(company)が登録されたメンバーのみ表示します。この会社の人が漏れている場合は、メンバー管理でその方の会社名を「${escHtml(company)}」に設定すると本一覧に含まれます。</div>`;
+  if(!payees.length){
+    html+=`<div class="card" style="line-height:1.8;">「${escHtml(company)}」に該当する支払が見つかりませんでした。<br><span style="font-size:12px;color:var(--text-sub);">・現場ツールの会社名(法人名)と表記が合っているかご確認ください（一部一致でOK：例「ラストワンマイル」「ロジ」など）。<br>・対象月(${escHtml(ym)})の明細が確定・公開済みかもご確認ください。</span></div>`;
+  }else{
+    Object.keys(byTool).forEach(tool=>{
+      const g=byTool[tool];
+      html+=`<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 14px;background:#f8fafc;border-bottom:1px solid var(--border);">
+          <span style="font-weight:700;font-size:12px;color:${g.color};">${tool}</span>
+          <span style="font-weight:700;font-size:13px;">${fmtYen(g.sum)} <span style="color:var(--text-sub);font-weight:400;font-size:11px;">(${g.items.length}名)</span></span>
+        </div>`;
+      g.items.forEach(p=>{
+        html+=`<div style="padding:9px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;">
+          <div>
+            <div style="font-weight:600;font-size:13px;">${escHtml(p.name||'(名称なし)')}</div>
+            ${p.sub?`<div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${escHtml(p.sub)}</div>`:''}
+          </div>
+          <div style="font-weight:700;font-size:14px;">${fmtYen(p.amount)}</div>
+        </div>`;
+      });
+      html+=`</div>`;
+    });
+  }
   $('result-area').innerHTML=html;
 }
-
-// 会社一覧の「詳細」→ その人を通常の個人表示で読み込む
-window.loadMemberById=function(id){
-  const m=(_companyMembers||[]).find(x=>String(x.id)===String(id));
-  if(!m)return;
-  const ph=normalizePhone(m.phone||'');
-  $('admin-name-input').value=m.display_name||'';
-  $('admin-phone-input').value=m.phone||'';
-  loadFor(ph, m.display_name||'', m);
-  window.scrollTo({top:0,behavior:'smooth'});
-};
 
 async function loadTargetProfile(phone, tp){
   // 検索で選んだ profile があればそれを使う (電話未登録者はこの経路)
