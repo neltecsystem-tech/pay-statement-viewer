@@ -132,7 +132,7 @@ table.detail tr.sat{background:#fef3c7;}
         <div class="card" style="background:#fef3c7;border-color:#f59e0b;">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
             <span style="font-weight:600;font-size:13px;">🔍 他人の明細検索:</span>
-            <input type="text" id="admin-name-input" class="input" placeholder="名前で検索 (例: 小林)" style="flex:1;min-width:160px;">
+            <input type="text" id="admin-name-input" class="input" placeholder="名前で検索 (例: 小林)" style="flex:1;min-width:160px;" autocomplete="off" oninput="onNameInput()" onkeydown="if(event.key==='Enter')adminSearch()">
             <span style="font-size:12px;color:#92400e;">または</span>
             <input type="tel" id="admin-phone-input" class="input" placeholder="電話番号 (例 090-1234-5678)" style="flex:1;min-width:180px;">
             <button class="btn" onclick="adminSearch()">検索</button>
@@ -469,6 +469,15 @@ function loadByPhone(){
   if(!phone||phone.length<10){alert('電話番号を入力してください');return;}
   loadFor(phone);
 }
+
+// 名前入力に応じてライブで候補を表示 (デバウンス)。候補はクリックで選択→明細読込。
+let _nameDebounce=null;
+window.onNameInput=function(){
+  const q=$('admin-name-input').value.trim();
+  clearTimeout(_nameDebounce);
+  if(!q){$('admin-name-results').style.display='none';return;}
+  _nameDebounce=setTimeout(()=>{ searchByName(q); }, 250);
+};
 
 async function adminSearch(){
   const name=$('admin-name-input').value.trim();
