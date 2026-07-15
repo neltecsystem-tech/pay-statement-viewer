@@ -597,13 +597,10 @@ function renderCompanyAgg(company, ym, tools){
   const byTool={};
   payees.forEach(p=>{ (byTool[p.tool]=byTool[p.tool]||{color:p.color,items:[],sum:0}); byTool[p.tool].items.push(p); byTool[p.tool].sum+=p.amount; });
 
-  // 会計「車両リース・貸付金マスタ」から控除: 会社名の行を優先、無ければ支払先ごとに合算
-  const dedItems=[];
-  const cd=accDeductionFor(company,ym);
-  if(cd.total>0){
-    if(cd.lease>0)dedItems.push({name:`${company}（車両リース料）`,amount:cd.lease});
-    if(cd.loan>0)dedItems.push({name:`${company}（貸付金返済）`,amount:cd.loan});
-  }else{
+  // 会計「車両リース・貸付金マスタ」から控除: 会社名で部分一致した全取引先行を合算。
+  // 無ければ支払先(氏名)ごとに完全一致で拾う。
+  let {items:dedItems}=accCompanyDeduction(company,ym);
+  if(!dedItems.length){
     payees.forEach(p=>{ const d=accDeductionFor(p.name,ym); if(d.lease>0)dedItems.push({name:`${p.name}（車両リース料）`,amount:d.lease}); if(d.loan>0)dedItems.push({name:`${p.name}（貸付金返済）`,amount:d.loan}); });
   }
   const dedTotal=dedItems.reduce((a,d)=>a+d.amount,0);
@@ -690,17 +687,33 @@ function _loanDue(row,month,loanOv){
   }
   return 0;
 }
-// 取引先名(個人=氏名 / 法人=会社名)+月 → {lease,loan,total}
-function accDeductionFor(name,month){
-  const key=nmKey(name||'');if(!key)return {lease:0,loan:0,total:0};
-  const row=(_accDed.rows||[]).find(r=>nmKey(r.name||'')===key);
-  if(!row)return {lease:0,loan:0,total:0};
+// 1行(会計マスタ)の当月控除 {lease,loan,total}
+function _accDedForRow(row,month){
+  const key=nmKey(row.name||'');
   const lo=(_accDed.ov||[]).find(o=>nmKey(o.name||'')===key&&o.month===month&&o.lease!=null&&String(o.lease)!=='');
   const lease=lo?Math.round(Number(lo.lease)||0):Math.round(Number(row.lease_monthly)||0);
   const loanOv=new Map();
   (_accDed.ov||[]).forEach(o=>{if(nmKey(o.name||'')===key&&o.loan!=null&&String(o.loan)!==''&&o.month)loanOv.set(o.month,Math.round(Number(o.loan)||0));});
   const loan=_loanDue(row,month,loanOv);
   return {lease,loan,total:lease+loan};
+}
+// 取引先名(個人=氏名)を完全一致で照合 → {lease,loan,total}
+function accDeductionFor(name,month){
+  const key=nmKey(name||'');if(!key)return {lease:0,loan:0,total:0};
+  const row=(_accDed.rows||[]).find(r=>nmKey(r.name||'')===key);
+  return row?_accDedForRow(row,month):{lease:0,loan:0,total:0};
+}
+// 法人: 会社名を部分一致で照合し、該当する全取引先行を合算 (会社名行・会社配下の個別行の両方を拾う)
+function accCompanyDeduction(company,month){
+  const key=nmKey(company||'');if(!key)return {items:[],total:0};
+  const items=[];
+  (_accDed.rows||[]).forEach(row=>{
+    if(!nmKey(row.name||'').includes(key))return;
+    const d=_accDedForRow(row,month);
+    if(d.lease>0)items.push({name:`${row.name}（車両リース料）`,amount:d.lease});
+    if(d.loan>0)items.push({name:`${row.name}（貸付金返済）`,amount:d.loan});
+  });
+  return {items,total:items.reduce((a,x)=>a+x.amount,0)};
 }
 // 明細ビューア用の差引項目配列に変換 (車両リース料 / 貸付金返済)
 function accDedItems(name,month){
