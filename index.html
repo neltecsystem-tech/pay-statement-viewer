@@ -485,25 +485,30 @@ async function searchByName(query){
   const results=$('admin-name-results');
   results.style.display='block';
   results.innerHTML='<div style="padding:10px;color:var(--text-sub);font-size:12px;"><span class="spinner"></span> 検索中...</div>';
-  const {data,error}=await sb.from('profiles').select('id, display_name, phone, role, company, position, is_company_owner, invoice_number').ilike('display_name','%'+query+'%').not('phone','is',null).limit(30);
+  // 管理者は電話番号未登録者も表示 (氏名照合で明細取得)。従来の .not('phone') フィルタは外す。
+  const {data,error}=await sb.from('profiles').select('id, display_name, phone, role, company, position, is_company_owner, invoice_number').ilike('display_name','%'+query+'%').limit(50);
   if(error){results.innerHTML=`<div style="padding:10px;color:var(--danger);font-size:12px;">検索エラー: ${escHtml(error.message)}</div>`;return;}
   if(!data||!data.length){
-    results.innerHTML=`<div style="padding:10px;color:var(--text-sub);font-size:12px;">該当者なし (電話番号未登録の人は出ません)</div>`;
+    results.innerHTML=`<div style="padding:10px;color:var(--text-sub);font-size:12px;">該当者なし</div>`;
     return;
   }
+  window._searchRes=data;
   const canEditOwner=profile?.role==='super_admin';
   results.innerHTML=data.map(p=>{
     const sub=[p.company,p.position].filter(Boolean).join(' / ');
     const adminTag=(p.role==='admin'||p.role==='super_admin')?'<span style="background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">管理者</span>':'';
     const ownerTag=p.is_company_owner?'<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">👑 オーナー</span>':'';
     const ownerToggle=canEditOwner?`<button onclick="event.stopPropagation();toggleOwner('${escHtml(p.id)}',${!p.is_company_owner})" style="background:transparent;border:1px dashed var(--border);padding:3px 7px;border-radius:6px;font-size:10px;cursor:pointer;color:var(--text-sub);">${p.is_company_owner?'オーナー解除':'オーナー設定'}</button>`:'';
-    return `<div onclick="pickName('${escHtml(p.phone)}','${escHtml(p.display_name||'')}')" style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
+    const phoneCell=p.phone
+      ?`<div style="font-size:11px;color:var(--text-sub);font-family:monospace;">${escHtml(p.phone)}</div>`
+      :`<div style="font-size:10px;color:#b45309;background:#fef3c7;border-radius:8px;padding:1px 7px;">電話未登録・氏名照合</div>`;
+    return `<div onclick="pickMember('${escHtml(p.id)}')" style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
       <div>
         <div style="font-weight:600;font-size:13px;">${escHtml(p.display_name||'(名前未設定)')}${adminTag}${ownerTag}</div>
         ${sub?`<div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${escHtml(sub)}</div>`:''}
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-        <div style="font-size:11px;color:var(--text-sub);font-family:monospace;">${escHtml(p.phone)}</div>
+        ${phoneCell}
         ${ownerToggle}
       </div>
     </div>`;
@@ -524,14 +529,20 @@ window.toggleOwner=async function(profileId,newValue){
   }
 };
 
-window.pickName=function(phone,name){
-  $('admin-phone-input').value=phone;
-  $('admin-name-input').value=name;
+// 検索結果からメンバーを選択。電話があれば電話照合、無ければ氏名照合(管理者のみ)。
+window.pickMember=function(id){
+  const p=(window._searchRes||[]).find(x=>String(x.id)===String(id));
+  if(!p)return;
+  $('admin-phone-input').value=p.phone||'';
+  $('admin-name-input').value=p.display_name||'';
   $('admin-name-results').style.display='none';
-  loadFor(normalizePhone(phone));
+  const ph=normalizePhone(p.phone||'');
+  loadFor(ph, p.display_name||'', p);
 };
 
-async function loadTargetProfile(phone){
+async function loadTargetProfile(phone, tp){
+  // 検索で選んだ profile があればそれを使う (電話未登録者はこの経路)
+  if(tp){targetProfile=tp;return;}
   // ログイン中ユーザー自身ならその profile を流用
   if(profile?.phone && normalizePhone(profile.phone)===phone){
     targetProfile=profile;
@@ -542,12 +553,13 @@ async function loadTargetProfile(phone){
   targetProfile=(data||[]).find(p=>normalizePhone(p.phone||'')===phone)||null;
 }
 
-async function loadFor(phone){
+async function loadFor(phone, name, tp){
   const ym=$('ym-input').value;
   if(!ym){alert('対象月を選択してください');return;}
+  if(!phone && !(name||'').trim()){alert('電話番号または名前で対象者を指定してください');return;}
   const area=$('result-area');
   area.innerHTML='<div class="card center"><div class="spinner"></div> 3ツールに問い合わせ中...</div>';
-  await loadTargetProfile(phone);
+  await loadTargetProfile(phone, tp);
 
   const callEf=async (url,anon)=>{
     try{
@@ -555,7 +567,7 @@ async function loadFor(phone){
       const resp=await fetch(url,{
         method:'POST',
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+anon},
-        body:JSON.stringify({phone,year_month:ym,auth_token:userJwt})
+        body:JSON.stringify({phone,name:name||'',year_month:ym,auth_token:userJwt})
       });
       if(resp.status===401)return {error:'認証エラー',code:'AUTH'};
       if(resp.status===403)return {error:'この明細にアクセスする権限がありません',code:'FORBIDDEN'};
