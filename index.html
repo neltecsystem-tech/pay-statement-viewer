@@ -582,7 +582,7 @@ async function loadCompany(company){
   const area=$('result-area');
   area.innerHTML=`<div class="card center"><div class="spinner"></div> 「${escHtml(company)}」の法人集計中（新聞・アスクル・デリバリー横断）...</div>`;
   $('btn-summary-pdf').disabled=true; $('btn-all-pdf').disabled=true; currentData=null;
-  const tools=await fetchTools('', '', company, ym);
+  const [tools]=await Promise.all([fetchTools('', '', company, ym), loadAccDeductions(ym)]);
   renderCompanyAgg(company, ym, tools);
 }
 
@@ -597,11 +597,32 @@ function renderCompanyAgg(company, ym, tools){
   const byTool={};
   payees.forEach(p=>{ (byTool[p.tool]=byTool[p.tool]||{color:p.color,items:[],sum:0}); byTool[p.tool].items.push(p); byTool[p.tool].sum+=p.amount; });
 
+  // 会計「車両リース・貸付金マスタ」から控除: 会社名の行を優先、無ければ支払先ごとに合算
+  const dedItems=[];
+  const cd=accDeductionFor(company,ym);
+  if(cd.total>0){
+    if(cd.lease>0)dedItems.push({name:`${company}（車両リース料）`,amount:cd.lease});
+    if(cd.loan>0)dedItems.push({name:`${company}（貸付金返済）`,amount:cd.loan});
+  }else{
+    payees.forEach(p=>{ const d=accDeductionFor(p.name,ym); if(d.lease>0)dedItems.push({name:`${p.name}（車両リース料）`,amount:d.lease}); if(d.loan>0)dedItems.push({name:`${p.name}（貸付金返済）`,amount:d.loan}); });
+  }
+  const dedTotal=dedItems.reduce((a,d)=>a+d.amount,0);
+  const net=total-dedTotal;
+
   let html=`<div class="grand-total-card">
-    <div class="label">🏢 ${escHtml(company)} / ${escHtml(ym)} 会社合計支払額（3ツール横断）</div>
-    <div class="value">${fmtYen(total)}</div>
-    <div style="font-size:11px;color:#92400e;margin-top:6px;">支払先 ${payees.length}件 ${errs.length?`／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
+    <div class="label">🏢 ${escHtml(company)} / ${escHtml(ym)} ${dedTotal>0?'差引後 ':''}会社合計支払額（3ツール横断）</div>
+    <div class="value">${fmtYen(net)}</div>
+    <div style="font-size:11px;color:#92400e;margin-top:6px;">支払先 ${payees.length}件${dedTotal>0?` ／ ツール合計 ${fmtYen(total)} − 控除 ${fmtYen(dedTotal)}`:''} ${errs.length?`／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
   </div>`;
+  if(dedTotal>0){
+    html+=`<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px;border-color:#f59e0b;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 14px;background:#fffbeb;border-bottom:1px solid #fde68a;">
+        <span style="font-weight:700;font-size:12px;color:#92400e;">💸 控除（会計マスタ連携）</span>
+        <span style="font-weight:700;font-size:13px;color:#b45309;">-${fmtYen(dedTotal)}</span>
+      </div>`;
+    dedItems.forEach(d=>{ html+=`<div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:12px;"><span>${escHtml(d.name)}</span><span style="color:#b45309;font-weight:600;">-${fmtYen(d.amount)}</span></div>`; });
+    html+=`</div>`;
+  }
   if(!payees.length){
     html+=`<div class="card" style="line-height:1.8;">「${escHtml(company)}」に該当する支払が見つかりませんでした。<br><span style="font-size:12px;color:var(--text-sub);">・現場ツールの会社名(法人名)と表記が合っているかご確認ください（一部一致でOK：例「ラストワンマイル」「ロジ」など）。<br>・対象月(${escHtml(ym)})の明細が確定・公開済みかもご確認ください。</span></div>`;
   }else{
@@ -640,6 +661,55 @@ async function loadTargetProfile(phone, tp){
   targetProfile=(data||[]).find(p=>normalizePhone(p.phone||'')===phone)||null;
 }
 
+// ── 会計「車両リース・貸付金マスタ」からの控除連携 (RPC get_driver_deductions) ──
+// 管理者/経理は全取引先、一般は本人分のみ返る。会計と同じロジックで当月控除を算出。
+let _accDed={rows:[],ov:[]};
+async function loadAccDeductions(month){
+  try{
+    const {data,error}=await sb.rpc('get_driver_deductions',{p_month:month});
+    if(error||!data){_accDed={rows:[],ov:[]};return;}
+    _accDed={rows:data.rows||[],ov:data.overrides||[]};
+  }catch(e){_accDed={rows:[],ov:[]};}
+}
+function _dedToIdx(s){const a=String(s||'').split('-').map(Number);return a[0]&&a[1]?a[0]*12+(a[1]-1):null;}
+function _dedIdxToYm(n){return `${Math.floor(n/12)}-${String((n%12)+1).padStart(2,'0')}`;}
+// 当月の貸付返済額(月別上書き反映・完済後0)。会計 loanDueWithOverrides と同一。
+function _loanDue(row,month,loanOv){
+  const total=Math.round(Number(row.loan_total)||0),monthly=Math.round(Number(row.loan_monthly)||0);
+  const start=_dedToIdx(row.loan_start||''),target=_dedToIdx(month);
+  if(start===null||target===null||target<start)return 0;
+  if(monthly<=0&&loanOv.size===0)return 0;
+  let cum=0;
+  for(let t=start;t<=target;t++){
+    const key=_dedIdxToYm(t);
+    let due=loanOv.has(key)?Math.round(loanOv.get(key)):monthly;
+    if(due<0)due=0;
+    if(total>0)due=Math.min(due,Math.max(0,total-cum));
+    if(t===target)return due;
+    cum+=due;
+  }
+  return 0;
+}
+// 取引先名(個人=氏名 / 法人=会社名)+月 → {lease,loan,total}
+function accDeductionFor(name,month){
+  const key=nmKey(name||'');if(!key)return {lease:0,loan:0,total:0};
+  const row=(_accDed.rows||[]).find(r=>nmKey(r.name||'')===key);
+  if(!row)return {lease:0,loan:0,total:0};
+  const lo=(_accDed.ov||[]).find(o=>nmKey(o.name||'')===key&&o.month===month&&o.lease!=null&&String(o.lease)!=='');
+  const lease=lo?Math.round(Number(lo.lease)||0):Math.round(Number(row.lease_monthly)||0);
+  const loanOv=new Map();
+  (_accDed.ov||[]).forEach(o=>{if(nmKey(o.name||'')===key&&o.loan!=null&&String(o.loan)!==''&&o.month)loanOv.set(o.month,Math.round(Number(o.loan)||0));});
+  const loan=_loanDue(row,month,loanOv);
+  return {lease,loan,total:lease+loan};
+}
+// 明細ビューア用の差引項目配列に変換 (車両リース料 / 貸付金返済)
+function accDedItems(name,month){
+  const d=accDeductionFor(name,month);const items=[];
+  if(d.lease>0)items.push({label:'車両リース料',amount:d.lease,active:true});
+  if(d.loan>0)items.push({label:'貸付金返済',amount:d.loan,active:true});
+  return items;
+}
+
 async function loadFor(phone, name, tp){
   const ym=$('ym-input').value;
   if(!ym){alert('対象月を選択してください');return;}
@@ -663,20 +733,20 @@ async function loadFor(phone, name, tp){
     }catch(e){return {error:e.message};}
   };
 
-  // 差引項目を並列取得 (targetProfile.id で SELECT、 RLS で本人 or admin が見える)
-  const deductionsFetch=async()=>{
-    if(!targetProfile?.id)return [];
-    const {data}=await sb.from('member_deductions').select('id, label, amount, active').eq('profile_id',targetProfile.id).eq('active',true).order('sort_order').order('created_at');
-    return data||[];
-  };
-
-  const [shift,askul,delivery,deductions]=await Promise.all([
+  // 控除は会計「車両リース・貸付金マスタ」から連携 (取引先名=氏名で照合)
+  const [shift,askul,delivery]=await Promise.all([
     callEf(SHIFT_URL,SUPABASE_ANON),
     callEf(ASKUL_URL,ASKUL_ANON),
     callEf(DELIVERY_URL,DELIVERY_ANON),
-    deductionsFetch(),
+    loadAccDeductions(ym),
   ]);
-
+  // 取引先名: NexPort表示名 → 無ければ各ツールの明細上の氏名
+  const nm=(targetProfile&&targetProfile.display_name)
+    ||(shift&&shift.statements&&shift.statements[0]&&shift.statements[0].staff_name)
+    ||(askul&&askul.statements&&askul.statements[0]&&askul.statements[0].driver_name)
+    ||(delivery&&delivery.statements&&delivery.statements[0]&&delivery.statements[0].driver_name)
+    ||name||'';
+  const deductions=accDedItems(nm,ym);
   renderResults({shift,askul,delivery,deductions,ym,phone});
 }
 
