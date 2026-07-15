@@ -615,6 +615,9 @@ function renderCompanyAgg(company, ym, tools){
     <div class="value">${fmtYen(net)}</div>
     <div style="font-size:11px;color:#92400e;margin-top:6px;">支払先 ${payees.length}件${dedTotal>0?` ／ ツール合計 ${fmtYen(total)} − 控除 ${fmtYen(dedTotal)}`:''} ${errs.length?`／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
   </div>`;
+  if(payees.length){
+    html+=`<div style="margin-bottom:12px;text-align:right;"><button class="btn btn-pdf" style="background:#0ea5e9;" onclick="downloadCompanyPdf()">📦 法人まとめPDF（会社合計＋全支払先の明細）</button></div>`;
+  }
   if(dedTotal>0){
     html+=`<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px;border-color:#f59e0b;">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 14px;background:#fffbeb;border-bottom:1px solid #fde68a;">
@@ -1426,6 +1429,119 @@ async function downloadAllPdf(){
     pdf.save(fname);
   }catch(e){alert('PDF生成失敗: '+e.message);}
   btn.textContent=old;btn.disabled=false;
+}
+
+// ── 法人まとめPDF (会社合計カバー + 全支払先の別紙明細) ──
+function buildCompanyCoverHtml(company, ym, payees, dedItems, dedTotal, toolTotal){
+  const [y,m]=ym.split('-').map(Number);
+  const fmtNum=n=>Math.round(Number(n)||0).toLocaleString();
+  const yen=n=>'￥'+fmtNum(n);
+  const net=toolTotal-dedTotal;
+  const mgmtNo=`N-${y}${String(m).padStart(2,'0')}-C`;
+  const issueDate=`${new Date().getFullYear()}年${new Date().getMonth()+1}月${new Date().getDate()}日`;
+  const cell='border-bottom:1px solid #e5e7eb;padding:7px 10px;font-size:12px;';
+  const payeeRows=payees.map(p=>`<tr>
+    <td style="${cell}white-space:nowrap;"><span style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:10px;font-weight:700;color:#fff;background:${p.color};">${p.tool}</span></td>
+    <td style="${cell}">${escHtml(p.name||'')}</td>
+    <td style="${cell}text-align:right;font-weight:600;">${yen(p.amount)}</td></tr>`).join('');
+  const dedRows=dedItems.map(d=>`<tr>
+    <td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">${escHtml(d.name)}</td>
+    <td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;color:#b91c1c;min-width:120px;">▲${yen(d.amount)}</td></tr>`).join('');
+  const line='border-bottom:1px solid #111;';
+  return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans','Hiragino Kaku Gothic Pro',sans-serif;color:#111;padding:34px 42px 30px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+      <div><h1 style="margin:0;font-size:30px;font-weight:800;letter-spacing:8px;">支払通知書</h1>
+        <div style="font-size:11px;color:#374151;margin-top:4px;letter-spacing:1px;">法人まとめ（3ツール横断）</div></div>
+      <div style="text-align:right;font-size:12px;line-height:1.9;"><div>発行日：${issueDate}</div><div>管理番号：${escHtml(mgmtNo)}</div></div>
+    </div>
+    <div style="margin-bottom:6px;">
+      <div style="font-size:20px;font-weight:700;border-bottom:1.5px solid #111;padding-bottom:4px;display:inline-block;min-width:260px;">${escHtml(company)}<span style="font-size:14px;font-weight:400;margin-left:24px;">御中</span></div>
+    </div>
+    <div style="font-size:12px;margin:12px 0 16px;">下記のとおりお支払い申し上げますので、ご確認くださいますようお願い申し上げます。</div>
+    <div style="display:flex;align-items:center;gap:16px;background:#f8fafc;border:1px solid #111;border-radius:4px;padding:12px 18px;margin-bottom:20px;">
+      <div style="font-size:15px;font-weight:700;letter-spacing:2px;">お支払額</div>
+      <div style="font-size:28px;font-weight:800;letter-spacing:1px;flex:1;text-align:right;">${yen(net)}</div>
+    </div>
+    <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">支払内容（対象ドライバー ${payees.length}名 / ${escHtml(eraLabel(y,m))}）</div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:18px;">
+      <thead><tr>
+        <th style="${cell}background:#f3f4f6;text-align:left;width:110px;">現場</th>
+        <th style="${cell}background:#f3f4f6;text-align:left;">支払先</th>
+        <th style="${cell}background:#f3f4f6;text-align:right;width:140px;">金額</th>
+      </tr></thead>
+      <tbody>${payeeRows}</tbody>
+    </table>
+    <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">金額内訳</div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:18px;">
+      <table style="border-collapse:collapse;font-size:13px;min-width:320px;">
+        <tr><td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">ツール合計</td><td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;min-width:120px;">${yen(toolTotal)}</td></tr>
+        ${dedRows}
+        <tr><td style="padding:8px 14px;text-align:right;font-weight:700;${line}border-top:2px solid #111;">合計金額</td><td style="padding:8px 6px;text-align:right;font-weight:800;font-size:16px;${line}border-top:2px solid #111;">${yen(net)}</td></tr>
+      </table>
+    </div>
+    <div style="font-size:11px;color:#374151;line-height:1.9;margin-bottom:22px;">
+      <div>＊各支払先の日別明細は別紙のとおり</div>
+      <div>＊振込手数料は弊社負担</div>
+      <div>＊記載内容に相違がある場合は、３営業日以内にご連絡ください</div>
+    </div>
+    <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">発行元</div>
+    <div style="position:relative;font-size:12px;line-height:1.9;border:1px solid #d1d5db;border-radius:4px;padding:12px 18px;">
+      <div><span style="display:inline-block;width:66px;color:#6b7280;">会社名</span>株式会社ＮＥＬＴＥＣ</div>
+      <div><span style="display:inline-block;width:66px;color:#6b7280;vertical-align:top;">所在地</span>〒170-0005 東京都豊島区南大塚2-38-1<br><span style="display:inline-block;width:66px;"></span>REID-C大塚ビル 5階</div>
+      <div><span style="display:inline-block;width:66px;color:#6b7280;">登録番号</span>T8011601022911</div>
+      <img src="${STAMP_DATA_URI}" alt="印" style="position:absolute;top:8px;right:18px;width:72px;height:72px;" />
+    </div>
+  </div>`;
+}
+function buildPayeeDetailHtml(p){
+  let detail='';
+  const st=p.st||{};
+  if(p.toolKey==='shift')detail=renderShiftDetail(st.rows||[]);
+  else if(p.toolKey==='askul')detail=renderAskulDetail(st.daily_rows||[]);
+  else if(p.toolKey==='delivery')detail=renderDeliveryDetail(st.daily_rows||[]);
+  return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans',sans-serif;color:#111;padding:28px 32px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid ${p.color};padding-bottom:8px;margin-bottom:14px;">
+      <div><div style="font-size:11px;color:#64748b;">${p.tool}　別紙明細</div>
+        <h2 style="margin:2px 0 0;font-size:18px;color:${p.color};">${escHtml(p.name||'')}</h2></div>
+      <div style="text-align:right;font-size:15px;font-weight:700;">${'￥'+Math.round(p.amount||0).toLocaleString()}</div>
+    </div>
+    ${detail||'<div style="color:#64748b;font-size:12px;">日別明細なし</div>'}
+  </div>`;
+}
+async function downloadCompanyPdf(){
+  const company=window._lastCompany, ym=window._lastCompanyYm, payees=_companyPayees||[];
+  if(!company||!payees.length){alert('法人集計を表示してから実行してください');return;}
+  const btn=document.querySelector('button[onclick="downloadCompanyPdf()"]');
+  const old=btn?btn.textContent:''; if(btn){btn.disabled=true;btn.textContent='⏳ 生成中...';}
+  try{
+    const toolTotal=payees.reduce((a,p)=>a+p.amount,0);
+    let {items:dedItems}=accCompanyDeduction(company,ym);
+    if(!dedItems.length){ payees.forEach(p=>{ const d=accDeductionFor(p.name,ym); if(d.lease>0)dedItems.push({name:`${p.name}（車両リース料）`,amount:d.lease}); if(d.loan>0)dedItems.push({name:`${p.name}（貸付金返済）`,amount:d.loan}); }); }
+    const dedTotal=dedItems.reduce((a,d)=>a+d.amount,0);
+    const sections=[buildCompanyCoverHtml(company,ym,payees,dedItems,dedTotal,toolTotal)];
+    payees.forEach(p=>sections.push(buildPayeeDetailHtml(p)));
+    const {jsPDF}=window.jspdf;
+    const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const pdfWidth=pdf.internal.pageSize.getWidth();
+    const pdfHeight=pdf.internal.pageSize.getHeight();
+    const stage=$('pdf-stage');
+    for(let i=0;i<sections.length;i++){
+      stage.innerHTML=sections[i];
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+      const target=stage.firstElementChild;
+      const canvas=await html2canvas(target,{scale:2,backgroundColor:'#ffffff',useCORS:true,logging:false});
+      const imgHeight=(canvas.height*pdfWidth)/canvas.width;
+      let heightLeft=imgHeight,position=0;
+      if(i>0)pdf.addPage();
+      const data=canvas.toDataURL('image/jpeg',0.95);
+      pdf.addImage(data,'JPEG',0,position,pdfWidth,imgHeight);
+      heightLeft-=pdfHeight;
+      while(heightLeft>0){ position=heightLeft-imgHeight; pdf.addPage(); pdf.addImage(data,'JPEG',0,position,pdfWidth,imgHeight); heightLeft-=pdfHeight; }
+    }
+    stage.innerHTML='';
+    pdf.save(safeFile(`${ym}_法人まとめ_${company}.pdf`));
+  }catch(e){alert('PDF生成失敗: '+e.message);}
+  if(btn){btn.textContent=old;btn.disabled=false;}
 }
 
 // ───────────────────────────────────────────
