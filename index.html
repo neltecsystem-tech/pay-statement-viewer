@@ -263,6 +263,20 @@ const SHIFT_URL=SUPABASE_URL+'/functions/v1/pay-statement-by-phone';
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON);
 
 let session=null;
+// EF 呼び出し直前に最新アクセストークンを取得 (期限切れなら自動更新)。長時間タブ放置でも 401 を防ぐ。
+async function freshToken(){
+  try{
+    let {data}=await sb.auth.getSession();
+    let s=data&&data.session;
+    // 期限切れ間近/切れていれば明示的にリフレッシュ
+    if(s&&s.expires_at&&s.expires_at*1000<Date.now()+30000){
+      const r=await sb.auth.refreshSession();
+      if(r&&r.data&&r.data.session)s=r.data.session;
+    }
+    if(s){session=s;return s.access_token||'';}
+  }catch(e){}
+  return (session&&session.access_token)||'';
+}
 let profile=null;// ログイン中のユーザー
 let targetProfile=null;// 現在表示中のドライバー (自分 or 検索した他人)
 let currentData=null;// {shift, askul, delivery, ym, phone}
@@ -556,7 +570,7 @@ window.pickMember=function(id){
 
 // 各ツールEFを叩いて {shift,askul,delivery} を返す。phone/name/company いずれかで照合。
 async function fetchTools(phone, name, company, ym){
-  const userJwt=session?.access_token||'';
+  const userJwt=await freshToken();
   const callEf=async (url,anon)=>{
     try{
       const resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+anon},body:JSON.stringify({phone:phone||'',name:name||'',company:company||'',year_month:ym,auth_token:userJwt})});
@@ -773,9 +787,9 @@ async function loadFor(phone, name, tp, fromCompany){
   area.innerHTML='<div class="card center"><div class="spinner"></div> 3ツールに問い合わせ中...</div>';
   await loadTargetProfile(phone, tp);
 
+  const userJwt=await freshToken();
   const callEf=async (url,anon)=>{
     try{
-      const userJwt=session?.access_token||'';
       const resp=await fetch(url,{
         method:'POST',
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+anon},
@@ -2016,6 +2030,9 @@ window.saveMemberEdit=async function(){
   closeMemberEdit();
   renderMemberList();
 };
+
+// トークン自動更新を session 変数へ反映 (長時間タブを開いても 401 にならないように)
+sb.auth.onAuthStateChange((_ev,ss)=>{ if(ss)session=ss; });
 
 // 起動: 既存セッション復帰
 (async function init(){
