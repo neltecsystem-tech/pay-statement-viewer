@@ -921,7 +921,10 @@ function buildSummaryHtml(){
 
   return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans','Hiragino Kaku Gothic Pro',sans-serif;color:#111;padding:34px 42px 30px;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
-      <h1 style="margin:0;font-size:30px;font-weight:800;letter-spacing:8px;">支払通知書</h1>
+      <div>
+        <h1 style="margin:0;font-size:30px;font-weight:800;letter-spacing:8px;">支払通知書</h1>
+        ${inv?`<div style="font-size:11px;color:#374151;margin-top:4px;letter-spacing:1px;">適格請求書等保存方式　仕入明細書 兼</div>`:''}
+      </div>
       <div style="text-align:right;font-size:12px;line-height:1.9;">
         <div>発行日：${issueDate}</div>
         <div>管理番号：${escHtml(mgmtNo)}</div>
@@ -930,7 +933,10 @@ function buildSummaryHtml(){
 
     <div style="margin-bottom:6px;">
       <div style="font-size:20px;font-weight:700;border-bottom:1.5px solid #111;padding-bottom:4px;display:inline-block;min-width:260px;">${escHtml(owner)}<span style="font-size:14px;font-weight:400;margin-left:24px;">様</span></div>
-      ${inv?`<div style="font-size:11px;color:#374151;margin-top:4px;">登録番号：${escHtml(inv.no)}</div>`:''}
+      ${inv?`<div style="font-size:12px;color:#111;margin-top:6px;display:flex;align-items:center;gap:8px;">
+        <span style="display:inline-block;padding:1px 7px;border:1px solid #111;border-radius:3px;font-size:10px;font-weight:700;white-space:nowrap;">適格請求書発行事業者</span>
+        <span>登録番号　<span style="font-weight:700;letter-spacing:.5px;">${escHtml(inv.no)}</span></span>
+      </div>`:''}
     </div>
     <div style="font-size:12px;margin:12px 0 16px;">下記のとおりお支払い申し上げますので、ご確認くださいますようお願い申し上げます。</div>
 
@@ -960,6 +966,7 @@ function buildSummaryHtml(){
     <div style="font-size:11px;color:#374151;line-height:1.9;margin-bottom:22px;">
       <div>＊振込手数料は弊社負担</div>
       <div>＊記載内容に相違がある場合は、３営業日以内にご連絡ください</div>
+      ${inv?`<div>＊本書は適格請求書等保存方式における仕入明細書を兼ねます（支払先登録番号：${escHtml(inv.no)}）。上記期限までにご連絡がない場合、記載内容をご確認いただいたものといたします。</div>`:''}
     </div>
 
     <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">発行元</div>
