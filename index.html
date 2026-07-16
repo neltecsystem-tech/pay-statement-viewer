@@ -136,6 +136,7 @@ table.detail tr.sat{background:#fef3c7;}
             <span style="font-size:12px;color:#92400e;">または</span>
             <input type="tel" id="admin-phone-input" class="input" placeholder="電話番号 (例 090-1234-5678)" style="flex:1;min-width:180px;">
             <button class="btn" onclick="adminSearch()">検索</button>
+            <button class="btn" style="background:#6366f1;" onclick="loadAllPayees()" title="対象月の全取引先(個人=氏名/法人・屋号=会社名)を3ツール横断で一覧集計">📋 取引先一覧（当月）</button>
           </div>
           <div id="admin-name-results" style="display:none;margin-top:6px;background:#fff;border-radius:6px;border:1px solid var(--border);max-height:240px;overflow-y:auto;"></div>
         </div>
@@ -669,6 +670,120 @@ function renderCompanyAgg(company, ym, tools){
   }
   $('result-area').innerHTML=html;
 }
+
+// ── 月次「取引先一覧」(P0再定義): 取引先 = company_name があればそれ / 無ければ個人(電話・氏名) ──
+const _CHAR_FOLD={'髙':'高','﨑':'崎','嵜':'崎','斎':'斉','齋':'斉','齊':'斉','邊':'辺','邉':'辺','澤':'沢','濱':'浜','濵':'浜','廣':'広','德':'徳','惠':'恵','槇':'槙','冨':'富','峯':'峰','舘':'館','曾':'曽','桒':'桑','渕':'淵','淸':'清','靑':'青','眞':'真','圓':'円','假':'仮','國':'国','瀨':'瀬','增':'増','莊':'荘','禮':'礼','ヶ':'ケ','ヵ':'カ'};
+function nmKeyV(s){ const t=String(s||'').normalize('NFKC').replace(/[\s　]/g,''); let o=''; for(const ch of t)o+=_CHAR_FOLD[ch]||ch; return o; }
+
+// 3ツールを list_all(管理者限定)で叩いて当月全件を取得
+async function fetchAllTools(ym){
+  const userJwt=await freshToken();
+  const callEf=async(url,anon)=>{ try{ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+anon},body:JSON.stringify({list_all:true,year_month:ym,auth_token:userJwt})}); if(!r.ok)return{error:'HTTP '+r.status,code:r.status}; return await r.json(); }catch(e){return{error:e.message};} };
+  const [shift,askul,delivery]=await Promise.all([callEf(SHIFT_URL,SUPABASE_ANON),callEf(ASKUL_URL,ASKUL_ANON),callEf(DELIVERY_URL,DELIVERY_ANON)]);
+  return {shift,askul,delivery};
+}
+
+// 全ツールの明細を取引先単位にグルーピング
+function groupPayees(tools){
+  const groups=new Map();
+  const add=(toolKey,tool,color,st,name,company,phone,amount,sub)=>{
+    const hasCo = company && String(company).trim();
+    let key,kind,label;
+    if(hasCo){ key='C:'+nmKeyV(company); kind='company'; label=String(company).trim(); }
+    else { const ph=normalizePhone(phone||''); key = ph?('P:'+ph):('N:'+nmKeyV(name)); kind='person'; label=String(name||'').trim(); }
+    let g=groups.get(key);
+    if(!g){ g={key,kind,label,company:hasCo?String(company).trim():'',phone:normalizePhone(phone||''),items:[],total:0}; groups.set(key,g); }
+    // 個人グループでlabelが空なら名前で補完
+    if(!g.label && name) g.label=String(name).trim();
+    g.items.push({toolKey,tool,color,name:String(name||'').trim(),amount:Number(amount)||0,sub:sub||'',st});
+    g.total+=Number(amount)||0;
+  };
+  (tools.shift&&tools.shift.statements||[]).forEach(s=>add('shift','新聞シフト','#0ea5e9',s,s.staff_name,s.company_name,s.phone,s.grand_total,s.primary_area));
+  (tools.askul&&tools.askul.statements||[]).forEach(s=>add('askul','アスクル','#f97316',s,s.driver_name,s.company_name,s.phone,s.payment_amount,''));
+  (tools.delivery&&tools.delivery.statements||[]).forEach(s=>add('delivery','デリバリー','#10b981',s,s.driver_name,s.company_name,s.phone,s.payment_amount,''));
+  return [...groups.values()];
+}
+
+let _allGroups=[];
+async function loadAllPayees(){
+  const ym=$('ym-input').value;
+  if(!ym){alert('対象月を選択してください');return;}
+  const area=$('result-area');
+  area.innerHTML=`<div class="card center"><div class="spinner"></div> ${escHtml(ym)} の取引先一覧を集計中（新聞・アスクル・デリバリー横断）...</div>`;
+  $('btn-summary-pdf').disabled=true; $('btn-all-pdf').disabled=true; currentData=null;
+  try{
+    const [tools]=await Promise.all([fetchAllTools(ym),loadAccDeductions(ym)]);
+    const authErr=[['新聞',tools.shift],['アスクル',tools.askul],['デリバリー',tools.delivery]].filter(([_,t])=>t&&t.code===403);
+    if(authErr.length===3){ area.innerHTML=`<div class="card" style="color:var(--danger);">取引先一覧は管理者のみ利用できます。</div>`; return; }
+    renderPayeeList(ym,groupPayees(tools),tools);
+  }catch(e){ area.innerHTML=`<div class="card" style="color:var(--danger);">取引先一覧の取得に失敗: ${escHtml(e.message||String(e))}</div>`; }
+}
+
+function renderPayeeList(ym,groups,tools){
+  groups.sort((a,b)=>b.total-a.total);
+  groups.forEach((g,i)=>g._i=i);
+  _allGroups=groups;
+  const grand=groups.reduce((a,g)=>a+g.total,0);
+  const errs=[['新聞',tools.shift],['アスクル',tools.askul],['デリバリー',tools.delivery]].filter(([_,t])=>t&&t.error).map(([n])=>n);
+  const nCorp=groups.filter(g=>g.kind==='company').length, nPer=groups.length-nCorp;
+  let html=`<div class="grand-total-card">
+    <div class="label">📋 ${escHtml(ym)} 取引先一覧 合計支払額（3ツール横断）</div>
+    <div class="value">${fmtYen(grand)}</div>
+    <div style="font-size:11px;color:#92400e;margin-top:6px;">取引先 ${groups.length}件（法人/屋号 ${nCorp}・個人 ${nPer}）${errs.length?` ／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
+  </div>`;
+  if(!groups.length){ html+=`<div class="card" style="line-height:1.8;">該当する明細がありません。<br><span style="font-size:12px;color:var(--text-sub);">対象月(${escHtml(ym)})が各ツールで確定・公開済みかご確認ください。</span></div>`; $('result-area').innerHTML=html; return; }
+  html+=`<div class="card" style="padding:0;overflow:hidden;">`;
+  groups.forEach(g=>{
+    const badge = g.kind==='company'
+      ? `<span style="background:#dbeafe;color:#1e40af;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:6px;">法人/屋号</span>`
+      : `<span style="background:#dcfce7;color:#15803d;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:6px;">個人</span>`;
+    const toolTags=g.items.map(it=>`<span style="color:${it.color};font-size:10px;font-weight:600;">${it.tool.replace('新聞シフト','新聞')}</span>`).join(' ・ ');
+    html+=`<div style="padding:10px 14px;border-bottom:1px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <div style="min-width:0;">
+          <div style="font-weight:700;font-size:14px;">${escHtml(g.label||'(名称なし)')}${badge}</div>
+          <div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${toolTags}${g.items.length>1?` ／ ${g.items.length}件`:''}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="font-weight:800;font-size:15px;">${fmtYen(g.total)}</div>
+          <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="togglePayeeGroup(${g._i})">📋 内訳</button>
+          <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="openPayeeGroup(${g._i})">→ 個別/PDF</button>
+        </div>
+      </div>
+      <div id="pg-detail-${g._i}" style="display:none;margin-top:8px;"></div>
+    </div>`;
+  });
+  html+=`</div>`;
+  $('result-area').innerHTML=html;
+}
+
+function _payeeDetailFor(it){
+  const st=it.st||{};
+  let h='';
+  if(it.toolKey==='shift')h=renderShiftDetail(st.rows||[]);
+  else if(it.toolKey==='askul')h=renderAskulDetail(st.daily_rows||[]);
+  else if(it.toolKey==='delivery')h=renderDeliveryDetail(st.daily_rows||[]);
+  return h||'<div style="color:var(--text-sub);font-size:12px;padding:6px 0;">日別明細なし</div>';
+}
+window.togglePayeeGroup=function(i){
+  const g=(_allGroups||[]).find(x=>x._i===i); const box=$('pg-detail-'+i); if(!g||!box)return;
+  if(box.style.display==='none'){
+    if(!box.dataset.loaded){
+      let h='';
+      g.items.forEach(it=>{ h+=`<div style="border:1px solid var(--border);border-radius:6px;margin-bottom:6px;overflow:hidden;">
+        <div style="display:flex;justify-content:space-between;padding:6px 10px;background:#f8fafc;font-size:12px;"><span style="color:${it.color};font-weight:700;">${escHtml(it.tool)}${it.sub?` <span style="color:var(--text-sub);font-weight:400;">${escHtml(it.sub)}</span>`:''}${g.kind==='company'&&it.name?` <span style="color:var(--text-sub);font-weight:400;">/ ${escHtml(it.name)}</span>`:''}</span><span style="font-weight:700;">${fmtYen(it.amount)}</span></div>
+        <div style="padding:6px 10px;overflow-x:auto;">${_payeeDetailFor(it)}</div></div>`; });
+      box.innerHTML=h; box.dataset.loaded='1';
+    }
+    box.style.display='block';
+  } else box.style.display='none';
+};
+window.openPayeeGroup=function(i){
+  const g=(_allGroups||[]).find(x=>x._i===i); if(!g)return;
+  if(g.kind==='company'){ $('admin-name-input').value=g.company||g.label; loadCompany(g.company||g.label); }
+  else { $('admin-name-input').value=g.label||''; $('admin-phone-input').value=g.phone||''; loadFor(g.phone||'', g.label||'', null, true); }
+  window.scrollTo({top:0,behavior:'smooth'});
+};
 
 // 会社集計: 支払先の日別明細をインラインで開閉
 window.togglePayeeDetail=function(idx){
