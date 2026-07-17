@@ -402,7 +402,36 @@ async function postLogin(){
   if(!profile.phone){
     await promptPhone();
   }
+  // 法人配下ドライバーはログイン不可(中央人材マスタ staff_master 参照)。個人/オーナー/担当者/社員/管理者は可。
+  const isAdmin=profile.role==='admin'||profile.role==='super_admin';
+  if(profile.phone && !isAdmin){
+    const blocked=await checkCentralGate(profile.phone);
+    if(blocked){ showCorpBlockScreen(); return; }
+  }
   if(profile.phone)loadAll();
+}
+
+// 中央人材マスタで法人配下判定。法人配下かつ owner/担当者でなければ true(ブロック)。中央未登録は通す(fail-open)。
+async function checkCentralGate(phone){
+  try{
+    const ph=normalizePhone(phone);
+    if(!ph)return false;
+    const {data}=await sb.from('staff_master').select('category,is_company_owner,is_company_contact,company_name').eq('phone',ph).maybeSingle();
+    if(!data)return false;
+    if(data.category==='法人配下' && !data.is_company_owner && !data.is_company_contact){ window._blockInfo=data; return true; }
+    return false;
+  }catch(_){ return false; }
+}
+function showCorpBlockScreen(){
+  const info=window._blockInfo||{};
+  $('screen-login').style.display='none';
+  $('screen-main').style.display='none';
+  let el=document.getElementById('screen-corp-block');
+  if(!el){ el=document.createElement('div'); el.id='screen-corp-block'; el.className='login-screen'; document.body.appendChild(el); }
+  el.style.display='block';
+  el.innerHTML=`<h2 style="color:var(--danger);">ご利用いただけません</h2>
+    <p style="font-size:14px;line-height:1.9;color:var(--text-sub);">${info.company_name?('「'+escHtml(info.company_name)+'」の'):''}法人配下ドライバーのアカウントです。<br>支払明細は<b>御社の担当者またはオーナー</b>がまとめてご確認いただく運用です。<br>閲覧が必要な場合は、御社のオーナーへビューアの「担当者」登録をご依頼ください。</p>
+    <button class="btn btn-block" onclick="doLogout();var e=document.getElementById('screen-corp-block');if(e)e.style.display='none';">ログアウト</button>`;
 }
 
 async function promptPhone(){
