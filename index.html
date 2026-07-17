@@ -109,6 +109,7 @@ table.detail tr.sat{background:#fef3c7;}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="btn btn-secondary" id="btn-open-admin" onclick="openAdminScreen()" title="メンバー管理" style="display:none;">👥 メンバー管理</button>
+          <button class="btn btn-secondary" id="btn-contact-mgr" onclick="openContactMgr()" title="自社の担当者(ビューアにログインできる人)を管理" style="display:none;background:#0891b2;color:#fff;">🏢 自社の担当者</button>
           <button class="btn btn-secondary" onclick="changePhone()" title="登録電話番号を変更">📱 電話変更</button>
           <button class="btn btn-secondary" onclick="editMyInvoice()" title="自分の適格請求書 登録番号(T+13桁)を登録/変更">🧾 ｲﾝﾎﾞｲｽ番号</button>
           <button class="btn btn-secondary" onclick="doLogout()">ログアウト</button>
@@ -408,8 +409,43 @@ async function postLogin(){
     const blocked=await checkCentralGate(profile.phone);
     if(blocked){ showCorpBlockScreen(); return; }
   }
+  // 法人オーナー/管理者には「自社の担当者管理」ボタンを表示
+  const showContact=isAdmin||(window._myCentral&&(window._myCentral.is_company_owner||window._myCentral.category==='法人オーナー'));
+  if(showContact)$('btn-contact-mgr').style.display='inline-flex';
   if(profile.phone)loadAll();
 }
+
+// 自社の担当者(ビューアにログインできる法人配下メンバー)管理 (法人オーナー/管理者)
+async function openContactMgr(){
+  const area=$('result-area');
+  area.innerHTML='<div class="card center"><div class="spinner"></div> 自社メンバーを読み込み中...</div>';
+  try{
+    const {data,error}=await sb.functions.invoke('staff-set-contact',{body:{action:'list'}});
+    if(error||data?.error){ area.innerHTML=`<div class="card" style="color:var(--danger);">読み込み失敗: ${escHtml((data&&data.error)||error?.message||'unknown')}</div>`; return; }
+    const members=data.members||[];
+    let h=`<div class="card"><div style="font-weight:700;font-size:15px;margin-bottom:4px;">🏢 自社の担当者管理${data.company?`（${escHtml(data.company)}）`:''}</div>
+      <div style="font-size:12px;color:var(--text-sub);margin-bottom:12px;line-height:1.7;">「担当者」ON にした人は、この明細ビューアにログインして自社の明細を確認できます。法人配下ドライバーは既定でログインできません（担当者・オーナーのみ）。</div>`;
+    if(!members.length){ h+=`<div style="color:var(--text-sub);font-size:13px;">自社に紐づくメンバーがいません（会社名の一致をご確認ください）。</div>`; }
+    members.forEach(m=>{
+      const isOwner=m.is_company_owner||m.category==='法人オーナー';
+      const badge=isOwner?'<span style="background:#fef3c7;color:#92400e;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:6px;">👑 オーナー</span>':(m.category==='法人配下'?'<span style="background:#dbeafe;color:#1e40af;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:6px;">法人配下</span>':'');
+      const toggle=isOwner?'<span style="font-size:11px;color:var(--text-sub);">常にログイン可</span>':
+        `<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;"><input type="checkbox" ${m.is_company_contact?'checked':''} onchange="toggleContact('${escHtml(m.phone)}',this.checked,this)"> 担当者(ログイン可)</label>`;
+      h+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 4px;border-bottom:1px solid var(--border);">
+        <div style="font-weight:600;font-size:13px;">${escHtml(m.full_name||'(名前未設定)')}${badge}</div>${toggle}</div>`;
+    });
+    h+=`</div>`;
+    area.innerHTML=h;
+  }catch(e){ area.innerHTML=`<div class="card" style="color:var(--danger);">エラー: ${escHtml(e.message||String(e))}</div>`; }
+}
+window.toggleContact=async function(phone,checked,el){
+  if(el)el.disabled=true;
+  try{
+    const {data,error}=await sb.functions.invoke('staff-set-contact',{body:{action:'set',phone,is_contact:checked}});
+    if(error||data?.error){ alert('更新失敗: '+((data&&data.error)||error?.message||'unknown')); if(el){el.checked=!checked;} }
+  }catch(e){ alert('更新失敗: '+(e.message||e)); if(el){el.checked=!checked;} }
+  finally{ if(el)el.disabled=false; }
+};
 
 // 中央人材マスタで法人配下判定。法人配下かつ owner/担当者でなければ true(ブロック)。中央未登録は通す(fail-open)。
 async function checkCentralGate(phone){
@@ -417,6 +453,7 @@ async function checkCentralGate(phone){
     const ph=normalizePhone(phone);
     if(!ph)return false;
     const {data}=await sb.from('staff_master').select('category,is_company_owner,is_company_contact,company_name').eq('phone',ph).maybeSingle();
+    window._myCentral=data||null;
     if(!data)return false;
     if(data.category==='法人配下' && !data.is_company_owner && !data.is_company_contact){ window._blockInfo=data; return true; }
     return false;
