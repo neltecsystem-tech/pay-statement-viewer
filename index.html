@@ -1708,44 +1708,56 @@ function buildCompanyCoverHtml(company, ym, payees, dedItems, dedTotal, toolTota
   const yen=n=>'￥'+fmtNum(n);
   const net=toolTotal-dedTotal;
   const mgmtNo=`N-${y}${String(m).padStart(2,'0')}-C`;
-  const issueDate=`${new Date().getFullYear()}年${new Date().getMonth()+1}月${new Date().getDate()}日`;
-  const cell='border-bottom:1px solid #e5e7eb;padding:7px 10px;font-size:12px;';
-  const payeeRows=payees.map(p=>`<tr>
-    <td style="${cell}white-space:nowrap;"><span style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:10px;font-weight:700;color:#fff;background:${p.color};">${p.tool}</span></td>
-    <td style="${cell}">${escHtml(p.name||'')}</td>
-    <td style="${cell}text-align:right;font-weight:600;">${yen(p.amount)}</td></tr>`).join('');
-  const dedRows=dedItems.map(d=>`<tr>
-    <td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">${escHtml(d.name)}</td>
-    <td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;color:#b91c1c;min-width:120px;">▲${yen(d.amount)}</td></tr>`).join('');
+  const issueDate=`${y}年${m}月末日`;
   const line='border-bottom:1px solid #111;';
+  // 会社の適格請求書登録番号を会計マスタ(invPartners)から照合(会計の支払通知書と同じ)
+  const okMonth=p=>(!p.effective_from || String(p.effective_from).slice(0,7)<=(ym||'9999-99'));
+  const co=(typeof normCo==='function')?normCo(company):String(company||'').trim();
+  const invHit=(invPartners||[]).find(p=>((typeof normCo==='function')?normCo(p.name):String(p.name||'').trim())===co && okMonth(p));
+  const registered=invHit?(invHit.registered!==false):false;
+  const tno=invHit?(invHit.invoice_number||''):'';
+  const hasTax=!!(registered&&tno);
+  const invLine=hasTax?`<div style="font-size:12px;color:#111;margin-top:6px;display:flex;align-items:center;gap:8px;"><span style="display:inline-block;padding:1px 7px;border:1px solid #111;border-radius:3px;font-size:10px;font-weight:700;white-space:nowrap;">適格請求書発行事業者</span><span>登録番号　<span style="font-weight:700;letter-spacing:.5px;">${escHtml(tno)}</span></span></div>`:'';
+  // 営業所(現場)を各支払先の明細から集約
+  const areas=[...new Set(payees.map(p=>String((p.st&&(p.st.primary_area||p.st.office_name||p.st.shipper))||'').trim()).filter(Boolean))];
+  const shipper=areas.join('・')||'—';
+  const rowKv=(label,val)=>`<tr><td style="width:110px;padding:8px 12px;font-size:12px;background:#f3f4f6;border:1px solid #d1d5db;font-weight:600;white-space:nowrap;">${label}</td><td style="padding:8px 12px;font-size:12px;border:1px solid #d1d5db;">${val}</td></tr>`;
+  const rN=(label,amount,sign)=>`<tr><td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">${escHtml(label)}</td><td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;min-width:120px;${sign==='-'?'color:#b91c1c;':''}">${sign==='-'?'▲':''}${yen(amount)}</td></tr>`;
+  // 金額内訳: 適格(登録番号あり)=外注費(税抜)+消費税(10%) / 非適格=外注費。控除は▲(会計テンプレ準拠)
+  let breakdown='';
+  if(hasTax){
+    const gaityu=Math.round(toolTotal/1.1), zei=toolTotal-gaityu;
+    breakdown+=rN('外注費',gaityu,'');
+    if(zei>0)breakdown+=rN('消費税（10%）',zei,'');
+  }else{
+    breakdown+=rN('外注費',toolTotal,'');
+  }
+  dedItems.forEach(d=>{ breakdown+=rN(d.name,d.amount,'-'); });
   return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans','Hiragino Kaku Gothic Pro',sans-serif;color:#111;padding:34px 42px 30px;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
-      <div><h1 style="margin:0;font-size:30px;font-weight:800;letter-spacing:8px;">支払通知書</h1>
-        <div style="font-size:11px;color:#374151;margin-top:4px;letter-spacing:1px;">法人まとめ（3ツール横断）</div></div>
+      <div><h1 style="margin:0;font-size:30px;font-weight:800;letter-spacing:8px;">支払通知書</h1></div>
       <div style="text-align:right;font-size:12px;line-height:1.9;"><div>発行日：${issueDate}</div><div>管理番号：${escHtml(mgmtNo)}</div></div>
     </div>
     <div style="margin-bottom:6px;">
       <div style="font-size:20px;font-weight:700;border-bottom:1.5px solid #111;padding-bottom:4px;display:inline-block;min-width:260px;">${escHtml(company)}<span style="font-size:14px;font-weight:400;margin-left:24px;">御中</span></div>
+      ${invLine}
     </div>
     <div style="font-size:12px;margin:12px 0 16px;">下記のとおりお支払い申し上げますので、ご確認くださいますようお願い申し上げます。</div>
     <div style="display:flex;align-items:center;gap:16px;background:#f8fafc;border:1px solid #111;border-radius:4px;padding:12px 18px;margin-bottom:20px;">
       <div style="font-size:15px;font-weight:700;letter-spacing:2px;">お支払額</div>
       <div style="font-size:28px;font-weight:800;letter-spacing:1px;flex:1;text-align:right;">${yen(net)}</div>
     </div>
-    <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">支払内容（対象ドライバー ${payees.length}名 / ${escHtml(eraLabel(y,m))}）</div>
+    <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">支払内容</div>
     <table style="width:100%;border-collapse:collapse;margin-bottom:18px;">
-      <thead><tr>
-        <th style="${cell}background:#f3f4f6;text-align:left;width:110px;">現場</th>
-        <th style="${cell}background:#f3f4f6;text-align:left;">支払先</th>
-        <th style="${cell}background:#f3f4f6;text-align:right;width:140px;">金額</th>
-      </tr></thead>
-      <tbody>${payeeRows}</tbody>
+      ${rowKv('ドライバー',`別紙のとおり（対象ドライバー ${payees.length}名）`)}
+      ${rowKv('年月',escHtml(eraLabel(y,m)))}
+      ${rowKv('営業所',escHtml(shipper))}
+      ${rowKv('詳細','別紙のとおり')}
     </table>
     <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">金額内訳</div>
     <div style="display:flex;justify-content:flex-end;margin-bottom:18px;">
-      <table style="border-collapse:collapse;font-size:13px;min-width:320px;">
-        <tr><td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">ツール合計</td><td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;min-width:120px;">${yen(toolTotal)}</td></tr>
-        ${dedRows}
+      <table style="border-collapse:collapse;font-size:13px;min-width:340px;">
+        ${breakdown}
         <tr><td style="padding:8px 14px;text-align:right;font-weight:700;${line}border-top:2px solid #111;">合計金額</td><td style="padding:8px 6px;text-align:right;font-weight:800;font-size:16px;${line}border-top:2px solid #111;">${yen(net)}</td></tr>
       </table>
     </div>
