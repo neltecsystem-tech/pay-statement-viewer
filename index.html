@@ -353,11 +353,13 @@ window.editMyInvoice=async function(){
   if(raw===null)return;
   const t=normInvoiceNo(raw);
   if(!isValidInvoiceNo(t)){alert('登録番号は「T + 13桁の数字」で入力してください (例: T1234567890123)。');return;}
-  const {error}=await sb.from('profiles').update({invoice_number:t||null}).eq('id',profile.id);
-  if(error){alert('更新失敗: '+error.message);return;}
+  // EF経由: profiles更新 + 会計マスタ(acc_invoice_partners)へ反映(法人=会社名/個人=氏名)
+  const {data,error}=await sb.functions.invoke('reflect-my-invoice',{body:{invoice_number:t}});
+  if(error||data?.error){alert('更新失敗: '+((data&&data.error)||error?.message||''));return;}
   profile.invoice_number=t||null;
   if(targetProfile&&targetProfile.id===profile.id)targetProfile.invoice_number=t||null;
-  alert(t?('✓ 登録番号を保存しました: '+t):'✓ 登録番号を「未登録」にしました');
+  const refMsg=data&&data.reflected?('\n会計マスタにも反映: 「'+(data.partner||'')+'」'):'';
+  alert(t?('✓ 登録番号を保存しました: '+t+refMsg):'✓ 登録番号を「未登録」にしました');
   if(currentData)renderResults(currentData);
 };
 
