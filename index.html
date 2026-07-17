@@ -430,7 +430,7 @@ async function openContactMgr(){
     if(!members.length){ h+=`<div style="color:var(--text-sub);font-size:13px;">対象となる法人配下ドライバーがいません。</div>`; }
     members.forEach(m=>{
       const co=m.company_name?`<span style="font-size:11px;color:var(--text-sub);margin-left:8px;">${escHtml(m.company_name)}</span>`:'';
-      const toggle=`<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;white-space:nowrap;"><input type="checkbox" ${m.is_company_contact?'checked':''} onchange="toggleContact('${escHtml(m.phone)}',this.checked,this)"> 担当者(ログイン可)</label>`;
+      const toggle=`<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;white-space:nowrap;"><input type="checkbox" ${m.is_company_contact?'checked':''} onchange="toggleContact('${escHtml(m.match_key)}',this.checked,this)"> 担当者(ログイン可)</label>`;
       h+=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border);">
         <div style="min-width:0;"><span style="font-weight:600;font-size:13px;">${escHtml(m.full_name||'(名前未設定)')}</span>${co}</div>${toggle}</div>`;
     });
@@ -438,10 +438,10 @@ async function openContactMgr(){
     area.innerHTML=h;
   }catch(e){ area.innerHTML=`<div class="card" style="color:var(--danger);">エラー: ${escHtml(e.message||String(e))}</div>`; }
 }
-window.toggleContact=async function(phone,checked,el){
+window.toggleContact=async function(match_key,checked,el){
   if(el)el.disabled=true;
   try{
-    const {data,error}=await sb.functions.invoke('staff-set-contact',{body:{action:'set',phone,is_contact:checked}});
+    const {data,error}=await sb.functions.invoke('staff-set-contact',{body:{action:'set',match_key,is_contact:checked}});
     if(error||data?.error){ alert('更新失敗: '+((data&&data.error)||error?.message||'unknown')); if(el){el.checked=!checked;} }
   }catch(e){ alert('更新失敗: '+(e.message||e)); if(el){el.checked=!checked;} }
   finally{ if(el)el.disabled=false; }
@@ -466,19 +466,19 @@ async function openCentralMaster(){
         <div style="flex:1;min-width:120px;font-weight:600;font-size:13px;">${escHtml(m.full_name||'(名前未設定)')}${mo}<span style="font-size:10px;color:var(--text-sub);margin-left:6px;">${escHtml((m.tools||[]).join('/'))}</span></div>
         <select id="cm-cat-${i}" style="padding:5px;border:1px solid var(--border);border-radius:6px;font-size:12px;">${opts}</select>
         <input id="cm-co-${i}" value="${escHtml(m.company_name||'')}" placeholder="会社名/屋号" style="width:150px;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
-        <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="saveCentral('${escHtml(m.phone)}',${i},this)">保存</button>
+        <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="saveCentral('${escHtml(m.match_key)}',${i},this)">保存</button>
       </div>`;
     });
     h+=`</div></div>`;
     area.innerHTML=h;
   }catch(e){ area.innerHTML=`<div class="card" style="color:var(--danger);">エラー: ${escHtml(e.message||String(e))}</div>`; }
 }
-window.saveCentral=async function(phone,i,btn){
+window.saveCentral=async function(match_key,i,btn){
   const category=$('cm-cat-'+i).value;
   const company_name=$('cm-co-'+i).value;
   if(btn){btn.disabled=true;btn.textContent='...';}
   try{
-    const {data,error}=await sb.functions.invoke('staff-set-contact',{body:{action:'set_category',phone,category,company_name}});
+    const {data,error}=await sb.functions.invoke('staff-set-contact',{body:{action:'set_category',match_key,category,company_name}});
     if(error||data?.error){ alert('保存失敗: '+((data&&data.error)||error?.message||'')); }
     else if(btn){ btn.textContent='✓'; setTimeout(()=>{btn.textContent='保存';btn.disabled=false;},1200); return; }
   }catch(e){ alert('保存失敗: '+(e.message||e)); }
