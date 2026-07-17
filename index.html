@@ -110,6 +110,7 @@ table.detail tr.sat{background:#fef3c7;}
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="btn btn-secondary" id="btn-open-admin" onclick="openAdminScreen()" title="メンバー管理" style="display:none;">👥 メンバー管理</button>
           <button class="btn btn-secondary" id="btn-contact-mgr" onclick="openContactMgr()" title="自社の担当者(ビューアにログインできる人)を管理" style="display:none;background:#0891b2;color:#fff;">🏢 自社の担当者</button>
+          <button class="btn btn-secondary" id="btn-central-master" onclick="openCentralMaster()" title="中央人材マスタの区分(個人/法人配下/社員)を手動整備" style="display:none;background:#7c3aed;color:#fff;">🗂 中央マスタ</button>
           <button class="btn btn-secondary" onclick="changePhone()" title="登録電話番号を変更">📱 電話変更</button>
           <button class="btn btn-secondary" onclick="editMyInvoice()" title="自分の適格請求書 登録番号(T+13桁)を登録/変更">🧾 ｲﾝﾎﾞｲｽ番号</button>
           <button class="btn btn-secondary" onclick="doLogout()">ログアウト</button>
@@ -398,6 +399,7 @@ async function postLogin(){
   if(profile.role==='admin'||profile.role==='super_admin'){
     $('admin-toggle-wrap').style.display='inline-flex';
     $('btn-open-admin').style.display='inline-flex';
+    $('btn-central-master').style.display='inline-flex';
   }
 
   if(!profile.phone){
@@ -443,6 +445,44 @@ window.toggleContact=async function(phone,checked,el){
     if(error||data?.error){ alert('更新失敗: '+((data&&data.error)||error?.message||'unknown')); if(el){el.checked=!checked;} }
   }catch(e){ alert('更新失敗: '+(e.message||e)); if(el){el.checked=!checked;} }
   finally{ if(el)el.disabled=false; }
+};
+
+// 🗂 中央人材マスタ 区分手動整備(管理者)。保存で manual_override=true → 自動同期の上書きを防ぐ。
+async function openCentralMaster(){
+  const area=$('result-area');
+  area.innerHTML='<div class="card center"><div class="spinner"></div> 中央マスタを読み込み中...</div>';
+  try{
+    const {data,error}=await sb.functions.invoke('staff-set-contact',{body:{action:'list_all'}});
+    if(error||data?.error){ area.innerHTML=`<div class="card" style="color:var(--danger);">読み込み失敗: ${escHtml((data&&data.error)||error?.message||'')}</div>`; return; }
+    const members=data.members||[];
+    const cats=['個人','法人配下','法人オーナー','社員'];
+    let h=`<div class="card"><div style="font-weight:700;font-size:15px;margin-bottom:4px;">🗂 中央人材マスタ 手動整備（${members.length}名）</div>
+      <div style="font-size:12px;color:var(--text-sub);margin-bottom:12px;line-height:1.7;">各人の<b>区分</b>と<b>会社名/屋号</b>を手動設定できます。保存すると「手動」扱いになり日次自動同期で上書きされません。<br><b>法人配下</b>＝ビューアにログイン不可（担当者/オーナーのみ）。<b>個人/社員/オーナー</b>＝ログイン可。</div>
+      <div style="max-height:62vh;overflow:auto;">`;
+    members.forEach((m,i)=>{
+      const opts=cats.map(c=>`<option value="${c}" ${m.category===c?'selected':''}>${c}</option>`).join('');
+      const mo=m.manual_override?'<span style="background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:8px;font-size:9px;margin-left:6px;">手動</span>':'';
+      h+=`<div style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap;">
+        <div style="flex:1;min-width:120px;font-weight:600;font-size:13px;">${escHtml(m.full_name||'(名前未設定)')}${mo}<span style="font-size:10px;color:var(--text-sub);margin-left:6px;">${escHtml((m.tools||[]).join('/'))}</span></div>
+        <select id="cm-cat-${i}" style="padding:5px;border:1px solid var(--border);border-radius:6px;font-size:12px;">${opts}</select>
+        <input id="cm-co-${i}" value="${escHtml(m.company_name||'')}" placeholder="会社名/屋号" style="width:150px;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
+        <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="saveCentral('${escHtml(m.phone)}',${i},this)">保存</button>
+      </div>`;
+    });
+    h+=`</div></div>`;
+    area.innerHTML=h;
+  }catch(e){ area.innerHTML=`<div class="card" style="color:var(--danger);">エラー: ${escHtml(e.message||String(e))}</div>`; }
+}
+window.saveCentral=async function(phone,i,btn){
+  const category=$('cm-cat-'+i).value;
+  const company_name=$('cm-co-'+i).value;
+  if(btn){btn.disabled=true;btn.textContent='...';}
+  try{
+    const {data,error}=await sb.functions.invoke('staff-set-contact',{body:{action:'set_category',phone,category,company_name}});
+    if(error||data?.error){ alert('保存失敗: '+((data&&data.error)||error?.message||'')); }
+    else if(btn){ btn.textContent='✓'; setTimeout(()=>{btn.textContent='保存';btn.disabled=false;},1200); return; }
+  }catch(e){ alert('保存失敗: '+(e.message||e)); }
+  if(btn){btn.disabled=false;btn.textContent='保存';}
 };
 
 // 中央人材マスタで法人配下判定。法人配下かつ owner/担当者でなければ true(ブロック)。中央未登録は通す(fail-open)。
