@@ -358,7 +358,9 @@ window.editMyInvoice=async function(){
   if(error||data?.error){alert('更新失敗: '+((data&&data.error)||error?.message||''));return;}
   profile.invoice_number=t||null;
   if(targetProfile&&targetProfile.id===profile.id)targetProfile.invoice_number=t||null;
-  const refMsg=data&&data.reflected?('\n会計マスタにも反映: 「'+(data.partner||'')+'」'):'';
+  let refMsg='';
+  if(data&&data.reflected)refMsg='\n会計マスタにも反映: 「'+(data.partner||'')+'」'+(data.matched?'(既存の正式名称に一致)':'');
+  else if(data&&data.unmatched)refMsg='\n⚠ 会計マスタに正式名称の取引先「'+(data.partner||'')+'」が見つかりませんでした。会計側で正式名称の取引先を登録すると次回から自動反映されます。';
   alert(t?('✓ 登録番号を保存しました: '+t+refMsg):'✓ 登録番号を「未登録」にしました');
   if(currentData)renderResults(currentData);
 };
