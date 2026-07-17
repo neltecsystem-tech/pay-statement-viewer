@@ -456,13 +456,24 @@ async function openCentralMaster(){
     if(error||data?.error){ area.innerHTML=`<div class="card" style="color:var(--danger);">読み込み失敗: ${escHtml((data&&data.error)||error?.message||'')}</div>`; return; }
     const members=data.members||[];
     const cats=['個人','法人配下','法人オーナー','社員'];
-    let h=`<div class="card"><div style="font-weight:700;font-size:15px;margin-bottom:4px;">🗂 人材マスタ（${members.length}名）</div>
-      <div style="font-size:12px;color:var(--text-sub);margin-bottom:12px;line-height:1.7;">全ツール横断の人材名簿。<b>区分・会社/屋号・電話・インボイス番号</b>を1画面で設定できます。保存すると「手動」扱いになり自動同期で上書きされず、NexPortアカウント側にも反映されます。<br><b>法人配下</b>＝ビューアにログイン不可（担当者/オーナーのみ）。<b>個人/社員/オーナー</b>＝ログイン可。控除は会計マスタが正（ここでは扱いません）。</div>
+    const catOpts=cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+    let h=`<div class="card"><div style="font-weight:700;font-size:15px;margin-bottom:4px;">🗂 人材マスタ（<span id="cm-total">${members.length}</span>名）</div>
+      <div style="font-size:12px;color:var(--text-sub);margin-bottom:10px;line-height:1.7;">全ツール横断の人材名簿。<b>区分・会社/屋号・電話・インボイス番号</b>を1画面で設定できます。保存すると「手動」扱いになり自動同期で上書きされず、NexPortアカウント側にも反映されます。<br><b>法人配下</b>＝ビューアにログイン不可（担当者/オーナーのみ）。<b>個人/社員/オーナー</b>＝ログイン可。控除は会計マスタが正（ここでは扱いません）。</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:8px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;">
+        <span style="font-size:12px;font-weight:700;color:var(--text-sub);">🔍 絞り込み</span>
+        <select id="cm-filter-cat" onchange="filterCentral()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
+          <option value="">区分すべて</option>${catOpts}
+        </select>
+        <input id="cm-filter-q" oninput="filterCentral()" placeholder="会社名・個人名で検索" style="flex:1;min-width:160px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
+        <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="document.getElementById('cm-filter-cat').value='';document.getElementById('cm-filter-q').value='';filterCentral();">クリア</button>
+        <span id="cm-filter-count" style="font-size:12px;color:var(--text-sub);white-space:nowrap;">${members.length}名</span>
+      </div>
       <div style="max-height:62vh;overflow:auto;">`;
     members.forEach((m,i)=>{
       const opts=cats.map(c=>`<option value="${c}" ${m.category===c?'selected':''}>${c}</option>`).join('');
       const mo=m.manual_override?'<span style="background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:8px;font-size:9px;margin-left:6px;">手動</span>':'';
-      h+=`<div style="padding:8px 4px;border-bottom:1px solid var(--border);">
+      const searchText=`${m.full_name||''} ${m.company_name||''} ${m.phone||''}`.toLowerCase();
+      h+=`<div class="cm-row" data-cat="${escHtml(m.category||'')}" data-search="${escHtml(searchText)}" style="padding:8px 4px;border-bottom:1px solid var(--border);">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <div style="flex:1;min-width:110px;font-weight:600;font-size:13px;">${escHtml(m.full_name||'(名前未設定)')}${mo}<span style="font-size:10px;color:var(--text-sub);margin-left:6px;">${escHtml((m.tools||[]).join('/'))}</span></div>
           <select id="cm-cat-${i}" style="padding:5px;border:1px solid var(--border);border-radius:6px;font-size:12px;">${opts}</select>
@@ -479,6 +490,20 @@ async function openCentralMaster(){
     area.innerHTML=h;
   }catch(e){ area.innerHTML=`<div class="card" style="color:var(--danger);">エラー: ${escHtml(e.message||String(e))}</div>`; }
 }
+// 人材マスタ 絞り込み: 区分(法人/個人/社員…) + 会社名・個人名テキスト
+window.filterCentral=function(){
+  const cat=($('cm-filter-cat')?$('cm-filter-cat').value:'')||'';
+  const q=(($('cm-filter-q')?$('cm-filter-q').value:'')||'').trim().toLowerCase();
+  let shown=0;
+  document.querySelectorAll('.cm-row').forEach(row=>{
+    const okCat=!cat||row.getAttribute('data-cat')===cat;
+    const okQ=!q||(row.getAttribute('data-search')||'').indexOf(q)>=0;
+    const show=okCat&&okQ;
+    row.style.display=show?'':'none';
+    if(show)shown++;
+  });
+  const c=$('cm-filter-count'); if(c)c.textContent=`${shown}名`;
+};
 window.saveCentral=async function(match_key,i,btn){
   const category=$('cm-cat-'+i).value;
   const company_name=$('cm-co-'+i).value;
