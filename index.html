@@ -423,16 +423,14 @@ async function openContactMgr(){
     const {data,error}=await sb.functions.invoke('staff-set-contact',{body:{action:'list'}});
     if(error||data?.error){ area.innerHTML=`<div class="card" style="color:var(--danger);">読み込み失敗: ${escHtml((data&&data.error)||error?.message||'unknown')}</div>`; return; }
     const members=data.members||[];
-    let h=`<div class="card"><div style="font-weight:700;font-size:15px;margin-bottom:4px;">🏢 自社の担当者管理${data.company?`（${escHtml(data.company)}）`:''}</div>
-      <div style="font-size:12px;color:var(--text-sub);margin-bottom:12px;line-height:1.7;">「担当者」ON にした人は、この明細ビューアにログインして自社の明細を確認できます。法人配下ドライバーは既定でログインできません（担当者・オーナーのみ）。</div>`;
-    if(!members.length){ h+=`<div style="color:var(--text-sub);font-size:13px;">自社に紐づくメンバーがいません（会社名の一致をご確認ください）。</div>`; }
+    let h=`<div class="card"><div style="font-weight:700;font-size:15px;margin-bottom:4px;">🏢 担当者管理（法人配下ドライバー）${data.company?`／${escHtml(data.company)}`:''}</div>
+      <div style="font-size:12px;color:var(--text-sub);margin-bottom:12px;line-height:1.7;">下は<b>法人配下ドライバー</b>の一覧です（個人・社員・オーナーは対象外＝元々ログインできます）。「担当者」を ON にした人だけが、この明細ビューアにログインして明細を確認できます。</div>`;
+    if(!members.length){ h+=`<div style="color:var(--text-sub);font-size:13px;">対象となる法人配下ドライバーがいません。</div>`; }
     members.forEach(m=>{
-      const isOwner=m.is_company_owner||m.category==='法人オーナー';
-      const badge=isOwner?'<span style="background:#fef3c7;color:#92400e;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:6px;">👑 オーナー</span>':(m.category==='法人配下'?'<span style="background:#dbeafe;color:#1e40af;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:6px;">法人配下</span>':'');
-      const toggle=isOwner?'<span style="font-size:11px;color:var(--text-sub);">常にログイン可</span>':
-        `<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;"><input type="checkbox" ${m.is_company_contact?'checked':''} onchange="toggleContact('${escHtml(m.phone)}',this.checked,this)"> 担当者(ログイン可)</label>`;
-      h+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 4px;border-bottom:1px solid var(--border);">
-        <div style="font-weight:600;font-size:13px;">${escHtml(m.full_name||'(名前未設定)')}${badge}</div>${toggle}</div>`;
+      const co=m.company_name?`<span style="font-size:11px;color:var(--text-sub);margin-left:8px;">${escHtml(m.company_name)}</span>`:'';
+      const toggle=`<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;white-space:nowrap;"><input type="checkbox" ${m.is_company_contact?'checked':''} onchange="toggleContact('${escHtml(m.phone)}',this.checked,this)"> 担当者(ログイン可)</label>`;
+      h+=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border);">
+        <div style="min-width:0;"><span style="font-weight:600;font-size:13px;">${escHtml(m.full_name||'(名前未設定)')}</span>${co}</div>${toggle}</div>`;
     });
     h+=`</div>`;
     area.innerHTML=h;
