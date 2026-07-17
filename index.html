@@ -300,6 +300,20 @@ function isValidInvoiceNo(t){return t===''||/^T\d{13}$/.test(t);}
 
 // 会計ツール「適格請求書マスタ(取引先)」のキャッシュ。会社名でT番号を引く
 let invPartners=[];// [{name, invoice_number, registered, effective_from}]
+let _noticePayees=null,_noticePayeesYm='';// 会計(acc_pay_rows)由来のNoticePayee[](支払通知書=会計が正)
+// 会計の支払通知書データ(適格/非適格・J/K/L・給与・控除を含む)を取得。管理者のみ(EFが権限判定)。
+async function loadNoticePayees(ym){
+  if(_noticePayeesYm===ym&&_noticePayees)return _noticePayees;
+  try{ const {data,error}=await sb.functions.invoke('pay-notice-data',{body:{month:ym}});
+    _noticePayees=(!error&&data&&data.payees)?data.payees:[]; _noticePayeesYm=ym;
+  }catch(_){ _noticePayees=[]; _noticePayeesYm=ym; }
+  return _noticePayees;
+}
+function findAccPayee(company){
+  if(!_noticePayees)return null;
+  const co=normCo(company);
+  return _noticePayees.find(p=>p.isCompany&&normCo(p.name)===co)||null;
+}
 // 会社名/取引先名の表記ゆれ吸収 (株式会社・合同会社・記号・空白を除去)
 function normCo(s){
   return String(s||'')
@@ -1710,29 +1724,45 @@ function buildCompanyCoverHtml(company, ym, payees, dedItems, dedTotal, toolTota
   const mgmtNo=`N-${y}${String(m).padStart(2,'0')}-C`;
   const issueDate=`${y}年${m}月末日`;
   const line='border-bottom:1px solid #111;';
-  // 会社の適格請求書登録番号を会計マスタ(invPartners)から照合(会計の支払通知書と同じ)
-  const okMonth=p=>(!p.effective_from || String(p.effective_from).slice(0,7)<=(ym||'9999-99'));
-  const co=(typeof normCo==='function')?normCo(company):String(company||'').trim();
-  const invHit=(invPartners||[]).find(p=>((typeof normCo==='function')?normCo(p.name):String(p.name||'').trim())===co && okMonth(p));
-  const registered=invHit?(invHit.registered!==false):false;
-  const tno=invHit?(invHit.invoice_number||''):'';
-  const hasTax=!!(registered&&tno);
-  const invLine=hasTax?`<div style="font-size:12px;color:#111;margin-top:6px;display:flex;align-items:center;gap:8px;"><span style="display:inline-block;padding:1px 7px;border:1px solid #111;border-radius:3px;font-size:10px;font-weight:700;white-space:nowrap;">適格請求書発行事業者</span><span>登録番号　<span style="font-weight:700;letter-spacing:.5px;">${escHtml(tno)}</span></span></div>`:'';
-  // 営業所(現場)を各支払先の明細から集約
-  const areas=[...new Set(payees.map(p=>String((p.st&&(p.st.primary_area||p.st.office_name||p.st.shipper))||'').trim()).filter(Boolean))];
-  const shipper=areas.join('・')||'—';
   const rowKv=(label,val)=>`<tr><td style="width:110px;padding:8px 12px;font-size:12px;background:#f3f4f6;border:1px solid #d1d5db;font-weight:600;white-space:nowrap;">${label}</td><td style="padding:8px 12px;font-size:12px;border:1px solid #d1d5db;">${val}</td></tr>`;
   const rN=(label,amount,sign)=>`<tr><td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">${escHtml(label)}</td><td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;min-width:120px;${sign==='-'?'color:#b91c1c;':''}">${sign==='-'?'▲':''}${yen(amount)}</td></tr>`;
-  // 金額内訳: 適格(登録番号あり)=外注費(税抜)+消費税(10%) / 非適格=外注費。控除は▲(会計テンプレ準拠)
-  let breakdown='';
-  if(hasTax){
-    const gaityu=Math.round(toolTotal/1.1), zei=toolTotal-gaityu;
-    breakdown+=rN('外注費',gaityu,'');
-    if(zei>0)breakdown+=rN('消費税（10%）',zei,'');
+  // ── 会計(acc_pay_rows)由来の NoticePayee があれば「会計が正」で全パターン描画。無ければツール集計にフォールバック ──
+  const accP=findAccPayee(company);
+  let registered,tno,payAmount,breakdown='',memberCount,shipper;
+  if(accP){
+    registered=!!accP.registered; tno=accP.tno||''; payAmount=Number(accP.payAmount)||0;
+    memberCount=accP.memberCount||payees.length;
+    shipper=accP.shipper||'—';
+    // 会計テンプレ(payNotice coverHtml)と同一の金額内訳ロジック
+    const jNet=Number(accP.outsourceNet)||0,kGross=Number(accP.outsourceGross)||0,fee=Number(accP.calcFee)||0;
+    const hasTax=!!(registered&&tno), zei=Math.max(0,kGross-jNet+fee);
+    if(hasTax){
+      if(jNet>0)breakdown+=rN('外注費',jNet,'');
+      if(fee>0)breakdown+=rN('計算手数料',fee,'-');
+      if(zei>0)breakdown+=rN('消費税（10%）',zei,'');
+    }else{
+      if(kGross>0)breakdown+=rN('外注費',kGross,'');
+    }
+    if((Number(accP.salary)||0)>0)breakdown+=rN('給与',Number(accP.salary)||0,'');
+    if((Number(accP.lease)||0)>0)breakdown+=rN('車両リース料',Number(accP.lease)||0,'-');
+    if((Number(accP.loan)||0)>0)breakdown+=rN('貸付金返済',Number(accP.loan)||0,'-');
+    if((Number(accP.advance)||0)>0)breakdown+=rN('立替経費',Number(accP.advance)||0,'-');
+    if((Number(accP.receivable)||0)>0)breakdown+=rN('未収入金',Number(accP.receivable)||0,'-');
   }else{
-    breakdown+=rN('外注費',toolTotal,'');
+    // フォールバック(会計未取込): ツール合計 − 控除。適格判定は会計マスタ(invPartners)。
+    const okMonth=p=>(!p.effective_from || String(p.effective_from).slice(0,7)<=(ym||'9999-99'));
+    const co=normCo(company);
+    const invHit=(invPartners||[]).find(p=>normCo(p.name)===co && okMonth(p));
+    registered=invHit?(invHit.registered!==false):false; tno=invHit?(invHit.invoice_number||''):'';
+    payAmount=net; memberCount=payees.length;
+    const areas=[...new Set(payees.map(p=>String((p.st&&(p.st.primary_area||p.st.office_name||p.st.shipper))||'').trim()).filter(Boolean))];
+    shipper=areas.join('・')||'—';
+    if(registered&&tno){ const gaityu=Math.round(toolTotal/1.1),zei=toolTotal-gaityu; breakdown+=rN('外注費',gaityu,''); if(zei>0)breakdown+=rN('消費税（10%）',zei,''); }
+    else breakdown+=rN('外注費',toolTotal,'');
+    dedItems.forEach(d=>{ breakdown+=rN(d.name,d.amount,'-'); });
   }
-  dedItems.forEach(d=>{ breakdown+=rN(d.name,d.amount,'-'); });
+  const hasTax=!!(registered&&tno);
+  const invLine=hasTax?`<div style="font-size:12px;color:#111;margin-top:6px;display:flex;align-items:center;gap:8px;"><span style="display:inline-block;padding:1px 7px;border:1px solid #111;border-radius:3px;font-size:10px;font-weight:700;white-space:nowrap;">適格請求書発行事業者</span><span>登録番号　<span style="font-weight:700;letter-spacing:.5px;">${escHtml(tno)}</span></span></div>`:'';
   return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans','Hiragino Kaku Gothic Pro',sans-serif;color:#111;padding:34px 42px 30px;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
       <div><h1 style="margin:0;font-size:30px;font-weight:800;letter-spacing:8px;">支払通知書</h1></div>
@@ -1745,11 +1775,11 @@ function buildCompanyCoverHtml(company, ym, payees, dedItems, dedTotal, toolTota
     <div style="font-size:12px;margin:12px 0 16px;">下記のとおりお支払い申し上げますので、ご確認くださいますようお願い申し上げます。</div>
     <div style="display:flex;align-items:center;gap:16px;background:#f8fafc;border:1px solid #111;border-radius:4px;padding:12px 18px;margin-bottom:20px;">
       <div style="font-size:15px;font-weight:700;letter-spacing:2px;">お支払額</div>
-      <div style="font-size:28px;font-weight:800;letter-spacing:1px;flex:1;text-align:right;">${yen(net)}</div>
+      <div style="font-size:28px;font-weight:800;letter-spacing:1px;flex:1;text-align:right;">${yen(payAmount)}</div>
     </div>
     <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">支払内容</div>
     <table style="width:100%;border-collapse:collapse;margin-bottom:18px;">
-      ${rowKv('ドライバー',`別紙のとおり（対象ドライバー ${payees.length}名）`)}
+      ${rowKv('ドライバー',`別紙のとおり（対象ドライバー ${memberCount}名）`)}
       ${rowKv('年月',escHtml(eraLabel(y,m)))}
       ${rowKv('営業所',escHtml(shipper))}
       ${rowKv('詳細','別紙のとおり')}
@@ -1758,7 +1788,7 @@ function buildCompanyCoverHtml(company, ym, payees, dedItems, dedTotal, toolTota
     <div style="display:flex;justify-content:flex-end;margin-bottom:18px;">
       <table style="border-collapse:collapse;font-size:13px;min-width:340px;">
         ${breakdown}
-        <tr><td style="padding:8px 14px;text-align:right;font-weight:700;${line}border-top:2px solid #111;">合計金額</td><td style="padding:8px 6px;text-align:right;font-weight:800;font-size:16px;${line}border-top:2px solid #111;">${yen(net)}</td></tr>
+        <tr><td style="padding:8px 14px;text-align:right;font-weight:700;${line}border-top:2px solid #111;">合計金額</td><td style="padding:8px 6px;text-align:right;font-weight:800;font-size:16px;${line}border-top:2px solid #111;">${yen(payAmount)}</td></tr>
       </table>
     </div>
     <div style="font-size:11px;color:#374151;line-height:1.9;margin-bottom:22px;">
@@ -1796,6 +1826,7 @@ async function downloadCompanyPdf(){
   const btn=document.querySelector('button[onclick="downloadCompanyPdf()"]');
   const old=btn?btn.textContent:''; if(btn){btn.disabled=true;btn.textContent='⏳ 生成中...';}
   try{
+    await loadNoticePayees(ym);// 会計(acc_pay_rows)の金額を「正」として支払通知書を作る
     const toolTotal=payees.reduce((a,p)=>a+p.amount,0);
     let {items:dedItems}=accCompanyDeduction(company,ym);
     if(!dedItems.length){ payees.forEach(p=>{ const d=accDeductionFor(p.name,ym); if(d.lease>0)dedItems.push({name:`${p.name}（車両リース料）`,amount:d.lease}); if(d.loan>0)dedItems.push({name:`${p.name}（貸付金返済）`,amount:d.loan}); }); }
