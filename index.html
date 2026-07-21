@@ -764,12 +764,18 @@ function renderCompanyAgg(company, ym, tools){
     payees.forEach(p=>{ const d=accDeductionFor(p.name,ym); if(d.lease>0)dedItems.push({name:`${p.name}（車両リース料）`,amount:d.lease}); if(d.loan>0)dedItems.push({name:`${p.name}（貸付金返済）`,amount:d.loan}); });
   }
   const dedTotal=dedItems.reduce((a,d)=>a+d.amount,0);
-  const net=total-dedTotal;
+  // 適格判定(会計マスタ invPartners)→適格なら消費税(10%)を上乗せ(支払通知書PDFと一致)。外注費(税抜)=ツール合計。
+  const _okM=p=>(!p.effective_from||String(p.effective_from).slice(0,7)<=(ym||'9999-99'));
+  const _co=normCo(company);
+  const _invHit=(invPartners||[]).find(p=>normCo(p.name)===_co&&_okM(p));
+  const _hasTax=!!(_invHit&&(_invHit.registered!==false)&&_invHit.invoice_number);
+  const zei=_hasTax?Math.round(total*0.1):0;
+  const net=total+zei-dedTotal;
 
   let html=`<div class="grand-total-card">
     <div class="label">🏢 ${escHtml(company)} / ${escHtml(ym)} ${dedTotal>0?'差引後 ':''}会社合計支払額（3ツール横断）</div>
     <div class="value">${fmtYen(net)}</div>
-    <div style="font-size:11px;color:#92400e;margin-top:6px;">支払先 ${payees.length}件${dedTotal>0?` ／ ツール合計 ${fmtYen(total)} − 控除 ${fmtYen(dedTotal)}`:''} ${errs.length?`／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
+    <div style="font-size:11px;color:#92400e;margin-top:6px;">支払先 ${payees.length}件 ／ 外注費 ${fmtYen(total)}${zei>0?` ＋消費税 ${fmtYen(zei)}`:''}${dedTotal>0?` − 控除 ${fmtYen(dedTotal)}`:''}${_hasTax?' <span style="color:#15803d;">(適格)</span>':''} ${errs.length?`／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
   </div>`;
   if(payees.length){
     html+=`<div style="margin-bottom:12px;text-align:right;"><button class="btn btn-pdf" style="background:#0ea5e9;" onclick="downloadCompanyPdf()">📦 法人まとめPDF（会社合計＋全支払先の明細）</button></div>`;
@@ -1393,12 +1399,16 @@ function buildSummaryHtml(){
   const toolTotal=calcTotal(currentData);
   const deds=(currentData.deductions||[]).filter(d=>d.active);
   const deductionTotal=deds.reduce((s,d)=>s+(Number(d.amount)||0),0);
-  const payAmount=toolTotal-deductionTotal;   // お支払額 / 合計金額
+  const inv=resolveInvoiceNo(targetProfile,ym);
+  const hasTax=!!(inv&&inv.no);
+  // 外注費(税抜)=ツール合計。適格なら消費税(10%)を上乗せ・お支払額=外注費×1.1−控除。非適格=税表記なし。
+  const gaityu=toolTotal;
+  const zei=hasTax?Math.round(gaityu*0.1):0;
+  const payAmount=gaityu+zei-deductionTotal;   // お支払額 / 合計金額
   // 営業所名: profiles.site → 無ければ新聞シフトの主稼働エリア
   const office=(targetProfile?.site||'').trim()||(shift?.statements?.[0]?.primary_area||'').trim()||'—';
   const mgmtNo=`N-${y}${String(m).padStart(2,'0')}`;
-  const issueDate=`${new Date().getFullYear()}年${new Date().getMonth()+1}月${new Date().getDate()}日`;
-  const inv=resolveInvoiceNo(targetProfile,ym);
+  const issueDate=`${y}年${m}月末日`;
   // 契約ツール一覧 (詳細=別紙のとおり の補足)
   const tools=[];
   if((shift?.statements||[]).length)   tools.push('新聞シフト 配達業務委託');
@@ -1453,8 +1463,8 @@ function buildSummaryHtml(){
     <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">金額内訳</div>
     <div style="display:flex;justify-content:flex-end;margin-bottom:18px;">
       <table style="border-collapse:collapse;font-size:13px;min-width:320px;">
-        <tr><td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">金額</td><td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;min-width:120px;">${yen(toolTotal)}</td></tr>
-        <tr><td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;border-top:1px solid #e5e7eb;">小計</td><td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;border-top:1px solid #e5e7eb;">${yen(toolTotal)}</td></tr>
+        <tr><td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">外注費</td><td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;min-width:120px;">${yen(gaityu)}</td></tr>
+        ${hasTax&&zei>0?`<tr><td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">消費税（10%）</td><td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;">${yen(zei)}</td></tr>`:''}
         ${dedRows}
         <tr><td style="padding:8px 14px;text-align:right;font-weight:700;${line}border-top:2px solid #111;">合計金額</td><td style="padding:8px 6px;text-align:right;font-weight:800;font-size:16px;${line}border-top:2px solid #111;">${yen(payAmount)}</td></tr>
       </table>
