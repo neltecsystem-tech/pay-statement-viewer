@@ -1,0 +1,346 @@
+<title>統合支払明細ビューア｜画面＆ボタン早見ガイド</title>
+<style>
+  :root{
+    --jp:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic UI","Yu Gothic","Noto Sans JP",Meiryo,system-ui,sans-serif;
+    --accent:#4f46e5; --accent-2:#6366f1; --accent-soft:#eef0ff;
+    --ground:#eef0f7; --surface:#ffffff; --surface-2:#f6f7fc; --panel:#fbfcff;
+    --ink:#1b1e2e; --ink-sub:#5a6076; --border:#e2e5f0; --line:#eceef6;
+    --everyone:#64748b; --admin:#4f46e5; --owner:#0891b2;
+    --shadow:0 10px 34px rgba(30,34,70,.11); --shadow-sm:0 3px 12px rgba(30,34,70,.08);
+    --hl:#fde68a;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --accent:#818cf8; --accent-2:#6366f1; --accent-soft:#20244a;
+      --ground:#0c0e1a; --surface:#161930; --surface-2:#1d2138; --panel:#141730;
+      --ink:#eef0f8; --ink-sub:#a3a9c4; --border:#2b2f4c; --line:#242844;
+      --everyone:#94a3b8; --admin:#a5b4fc; --owner:#22d3ee;
+      --shadow:0 14px 44px rgba(0,0,0,.5); --shadow-sm:0 3px 14px rgba(0,0,0,.4); --hl:#78610f;
+    }
+  }
+  :root[data-theme="light"]{
+    --accent:#4f46e5; --accent-2:#6366f1; --accent-soft:#eef0ff;
+    --ground:#eef0f7; --surface:#ffffff; --surface-2:#f6f7fc; --panel:#fbfcff;
+    --ink:#1b1e2e; --ink-sub:#5a6076; --border:#e2e5f0; --line:#eceef6;
+    --everyone:#64748b; --admin:#4f46e5; --owner:#0891b2; --hl:#fde68a;
+    --shadow:0 10px 34px rgba(30,34,70,.11); --shadow-sm:0 3px 12px rgba(30,34,70,.08);
+  }
+  :root[data-theme="dark"]{
+    --accent:#818cf8; --accent-2:#6366f1; --accent-soft:#20244a;
+    --ground:#0c0e1a; --surface:#161930; --surface-2:#1d2138; --panel:#141730;
+    --ink:#eef0f8; --ink-sub:#a3a9c4; --border:#2b2f4c; --line:#242844;
+    --everyone:#94a3b8; --admin:#a5b4fc; --owner:#22d3ee; --hl:#78610f;
+    --shadow:0 14px 44px rgba(0,0,0,.5); --shadow-sm:0 3px 14px rgba(0,0,0,.4);
+  }
+
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--jp);
+    -webkit-font-smoothing:antialiased;line-height:1.6;}
+  .wrap{max-width:1240px;margin:0 auto;padding:22px 18px 60px;}
+
+  header.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+    margin-bottom:16px;}
+  .brand{display:flex;align-items:center;gap:11px;}
+  .brand .logo{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font-size:20px;box-shadow:var(--shadow-sm);}
+  .brand b{font-size:16px;} .brand span{display:block;font-size:12px;color:var(--ink-sub);margin-top:1px;}
+  .legendkey{display:flex;gap:8px;flex-wrap:wrap;font-size:11.5px;}
+  .pk{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;font-weight:700;
+    border:1px solid var(--border);background:var(--surface);}
+  .pk i{width:9px;height:9px;border-radius:50%;font-style:normal;}
+  .pk.e i{background:var(--everyone);} .pk.a i{background:var(--admin);} .pk.o i{background:var(--owner);}
+
+  .tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
+  .tab{border:1px solid var(--border);background:var(--surface);color:var(--ink-sub);font-weight:700;
+    font-size:13.5px;padding:10px 18px;border-radius:11px;cursor:pointer;display:flex;align-items:center;gap:8px;
+    box-shadow:var(--shadow-sm);transition:transform .12s;}
+  .tab:hover{transform:translateY(-1px);}
+  .tab.on{background:var(--accent);color:#fff;border-color:transparent;}
+  .tab .c{background:rgba(255,255,255,.22);border-radius:6px;font-size:11px;padding:1px 7px;font-variant-numeric:tabular-nums;}
+  .tab:not(.on) .c{background:var(--accent-soft);color:var(--accent);}
+
+  .layout{display:grid;grid-template-columns:1.15fr .85fr;gap:20px;align-items:start;}
+  @media (max-width:940px){ .layout{grid-template-columns:1fr;} }
+
+  /* ---- screen mock ---- */
+  .screenwrap{position:relative;}
+  .mock{background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);
+    overflow:hidden;position:sticky;top:16px;}
+  .m-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:15px 16px;
+    border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  .m-title{font-size:15px;font-weight:800;} .m-title small{display:block;font-size:11px;color:var(--ink-sub);font-weight:500;}
+  .m-btns{display:flex;gap:6px;flex-wrap:wrap;}
+  .m-body{padding:15px 16px;display:flex;flex-direction:column;gap:13px;}
+  .toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:11px;border:1px solid var(--line);
+    border-radius:11px;background:var(--surface-2);}
+  .lbl{font-size:12px;color:var(--ink-sub);font-weight:600;}
+  .inp{border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:12px;background:var(--surface);
+    color:var(--ink-sub);min-width:96px;}
+  .adminbar{border:1px solid #f0b429;background:rgba(253,230,138,.28);border-radius:11px;padding:11px;
+    display:flex;flex-direction:column;gap:9px;}
+  .adminbar .r{display:flex;gap:7px;align-items:center;flex-wrap:wrap;}
+  .card2{border:1px solid var(--line);border-radius:11px;background:var(--panel);padding:12px;
+    display:flex;flex-direction:column;gap:9px;}
+  .c-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .c-top b{font-size:12.5px;} .muted{color:var(--ink-sub);font-size:11px;}
+  .rowline{display:flex;justify-content:space-between;font-size:11.5px;padding:5px 0;border-bottom:1px dashed var(--line);
+    font-variant-numeric:tabular-nums;} .rowline:last-child{border-bottom:0;} .rowline b{font-weight:700;}
+  .memberrow{display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--line);
+    border-radius:9px;padding:9px 11px;background:var(--panel);}
+  .memberrow .who b{font-size:12.5px;} .memberrow .who small{display:block;color:var(--ink-sub);font-size:10.5px;}
+  .filterbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center;}
+
+  /* mock buttons mirror real colors */
+  .mb{position:relative;display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;
+    padding:7px 11px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--ink);
+    white-space:nowrap;box-shadow:var(--shadow-sm);}
+  .mb.sec{background:var(--surface-2);color:var(--ink-sub);}
+  .mb.pri{background:var(--accent);color:#fff;border-color:transparent;}
+  .mb.indigo{background:#6366f1;color:#fff;border-color:transparent;}
+  .mb.teal{background:#0891b2;color:#fff;border-color:transparent;}
+  .mb.purple{background:#7c3aed;color:#fff;border-color:transparent;}
+  .mb.sky{background:#0ea5e9;color:#fff;border-color:transparent;}
+  .mb.green{background:#10b981;color:#fff;border-color:transparent;}
+  .mb.ghost{background:transparent;color:var(--ink-sub);border-style:dashed;}
+  .mb.sm{font-size:10.5px;padding:5px 9px;}
+  .chk{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--ink-sub);
+    position:relative;padding:4px 2px;}
+  .chk i{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--accent);font-style:normal;display:inline-block;}
+
+  /* number pin */
+  .pin{position:absolute;top:-9px;left:-9px;width:22px;height:22px;border-radius:50%;background:var(--accent);
+    color:#fff;font-size:11.5px;font-weight:800;display:grid;place-items:center;box-shadow:0 2px 8px rgba(79,70,229,.5);
+    z-index:3;cursor:pointer;font-variant-numeric:tabular-nums;transition:transform .14s,box-shadow .14s;
+    border:2px solid var(--surface);}
+  .pin.owner{background:var(--owner);box-shadow:0 2px 8px rgba(8,145,178,.5);}
+  .pin.admin{background:var(--admin);}
+  .pin.act{transform:scale(1.35);box-shadow:0 4px 16px rgba(79,70,229,.7);}
+  .haspin{position:relative;}
+
+  /* ---- legend ---- */
+  .legpanel{display:flex;flex-direction:column;gap:7px;}
+  .leggroup{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);
+    margin:12px 2px 3px;}
+  .leggroup:first-child{margin-top:0;}
+  .leg{display:grid;grid-template-columns:26px 1fr;gap:11px;align-items:start;padding:11px 12px;border-radius:11px;
+    border:1px solid var(--border);background:var(--surface);cursor:default;transition:background .14s,border-color .14s,transform .12s;}
+  .leg:hover{transform:translateX(2px);}
+  .leg.act{background:var(--hl);border-color:transparent;}
+  .leg .n{width:26px;height:26px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:800;
+    display:grid;place-items:center;font-size:12.5px;font-variant-numeric:tabular-nums;}
+  .leg.owner .n{background:rgba(8,145,178,.14);color:var(--owner);}
+  .leg .t b{font-size:13px;} .leg .t p{margin:3px 0 0;font-size:12px;color:var(--ink-sub);line-height:1.5;}
+  .perm{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;
+    margin-left:7px;vertical-align:middle;}
+  .perm.e{background:rgba(100,116,139,.14);color:var(--everyone);}
+  .perm.a{background:var(--accent-soft);color:var(--admin);}
+  .perm.o{background:rgba(8,145,178,.14);color:var(--owner);}
+
+  .screen,.legpanel{display:none;} .screen.on,.legpanel.on{display:flex;}
+  .screen.on{display:block;}
+  .note{margin-top:18px;font-size:12px;color:var(--ink-sub);background:var(--surface);border:1px dashed var(--border);
+    border-radius:12px;padding:12px 15px;}
+  .note b{color:var(--accent);}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="logo">📑</div>
+      <div><b>統合支払明細ビューア｜画面＆ボタン早見ガイド</b><span>どの画面のどのボタンが何をするか</span></div>
+    </div>
+    <div class="legendkey">
+      <span class="pk e"><i></i>誰でも</span>
+      <span class="pk a"><i></i>管理者のみ</span>
+      <span class="pk o"><i></i>法人オーナー</span>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab on" data-s="1">📑 明細ビューア（メイン画面）<span class="c">19</span></button>
+    <button class="tab" data-s="2">🗂 人材マスタ（管理者画面）<span class="c">9</span></button>
+  </div>
+
+  <div class="layout">
+    <div class="screenwrap">
+      <!-- ============ SCREEN 1 ============ -->
+      <div class="screen on" data-s="1">
+        <div class="mock">
+          <div class="m-head">
+            <div class="m-title">📑 統合支払明細ビューア<small>山田 太郎 さん / 個建</small></div>
+            <div class="m-btns">
+              <span class="mb sec haspin">👥 メンバー管理<span class="pin admin" data-k="s1-1">1</span></span>
+              <span class="mb teal haspin">🏢 自社の担当者<span class="pin owner" data-k="s1-2">2</span></span>
+              <span class="mb purple haspin">🗂 人材マスタ<span class="pin admin" data-k="s1-3">3</span></span>
+              <span class="mb sec haspin">📱 電話変更<span class="pin" data-k="s1-4">4</span></span>
+              <span class="mb sec haspin">🧾 ｲﾝﾎﾞｲｽ番号<span class="pin" data-k="s1-5">5</span></span>
+              <span class="mb sec haspin">ログアウト<span class="pin" data-k="s1-6">6</span></span>
+            </div>
+          </div>
+          <div class="m-body">
+            <div class="toolbar">
+              <span class="lbl">対象月:</span>
+              <span class="inp haspin">2026-07<span class="pin" data-k="s1-7">7</span></span>
+              <span class="mb pri haspin">読み込み<span class="pin" data-k="s1-8">8</span></span>
+              <span class="mb sky haspin">📄 サマリーPDF<span class="pin" data-k="s1-9">9</span></span>
+              <span class="mb ghost haspin">📦 全部一括PDF<span class="pin" data-k="s1-10">10</span></span>
+              <span class="chk haspin" style="margin-left:auto;"><i></i>管理者: 任意電話検索<span class="pin admin" data-k="s1-11">11</span></span>
+            </div>
+
+            <div class="adminbar">
+              <div class="r">
+                <span style="font-weight:700;font-size:12px;">🔍 他人の明細検索:</span>
+                <span class="inp haspin" style="flex:1;">名前で検索（例: 山田）<span class="pin admin" data-k="s1-12">12</span></span>
+                <span class="muted">または</span>
+                <span class="inp" style="flex:1;">電話番号（例 090-…）</span>
+                <span class="mb pri haspin">検索<span class="pin admin" data-k="s1-13">13</span></span>
+                <span class="mb indigo haspin">📋 取引先一覧（当月）<span class="pin admin" data-k="s1-14">14</span></span>
+              </div>
+            </div>
+
+            <div class="card2">
+              <div class="c-top"><b>📦 アスクル</b>
+                <span class="mb ghost sm haspin">📄 PDF<span class="pin" data-k="s1-15">15</span></span>
+              </div>
+              <div class="rowline"><span class="muted">外注費（税抜）</span><b>¥298,000</b></div>
+              <div class="rowline"><span class="muted">消費税（適格10%）</span><b>¥29,800</b></div>
+              <div class="rowline"><span class="muted">お支払額</span><b>¥292,130</b></div>
+              <span class="mb ghost sm haspin" style="align-self:flex-start;">📅 日別を見る<span class="pin" data-k="s1-16">16</span></span>
+            </div>
+
+            <div class="card2">
+              <div class="c-top"><b>🏢 会社別グループ集計（管理者）</b><span class="muted">株式会社△△運送</span></div>
+              <div class="rowline"><span class="muted">お支払額（税込）</span><b>¥1,344,280</b></div>
+              <div class="r" style="display:flex;gap:6px;flex-wrap:wrap;">
+                <span class="mb sm haspin">📋 内訳<span class="pin admin" data-k="s1-17">17</span></span>
+                <span class="mb sec sm haspin">→ 個別/PDF<span class="pin admin" data-k="s1-18">18</span></span>
+                <span class="mb sky sm haspin">📦 法人まとめPDF<span class="pin admin" data-k="s1-19">19</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ SCREEN 2 ============ -->
+      <div class="screen" data-s="2">
+        <div class="mock">
+          <div class="m-head">
+            <div class="m-title">🗂 人材マスタ / メンバー管理<small>管理者専用</small></div>
+            <div class="m-btns">
+              <span class="mb sec haspin">← 明細ビューアに戻る<span class="pin admin" data-k="s2-1">1</span></span>
+              <span class="mb sec">ログアウト</span>
+            </div>
+          </div>
+          <div class="m-body">
+            <div class="toolbar">
+              <span class="mb pri haspin">🔄 再読み込み<span class="pin admin" data-k="s2-2">2</span></span>
+              <span class="mb green haspin">📥 ツールから自動補完<span class="pin admin" data-k="s2-3">3</span></span>
+              <span class="mb indigo haspin">🏢 会社名を自動補完<span class="pin admin" data-k="s2-4">4</span></span>
+            </div>
+            <div class="filterbar">
+              <span class="inp haspin">区分すべて ▾<span class="pin admin" data-k="s2-5">5</span></span>
+              <span class="inp" style="flex:1;">名前 / 電話 / 会社で検索</span>
+            </div>
+            <div class="memberrow">
+              <div class="who"><b>佐藤 花子</b><small>サンプル運輸（屋号）・ 個建</small></div>
+              <div style="display:flex;gap:6px;">
+                <span class="mb pri sm haspin">📄 明細<span class="pin admin" data-k="s2-6">6</span></span>
+                <span class="mb ghost sm haspin">編集<span class="pin admin" data-k="s2-7">7</span></span>
+                <span class="mb ghost sm haspin">オーナー設定<span class="pin owner" data-k="s2-8">8</span></span>
+              </div>
+            </div>
+            <div class="memberrow">
+              <div class="who"><b>鈴木 一郎</b><small>電話未登録</small></div>
+              <div style="display:flex;gap:6px;">
+                <span class="mb pri sm">📄 明細</span><span class="mb ghost sm">編集</span>
+              </div>
+            </div>
+            <div class="card2 haspin">
+              <b style="font-size:12px;">✏ 編集モーダル（区分 / 会社 / 電話 / インボイス / 控除）</b>
+              <div class="r" style="display:flex;gap:6px;">
+                <span class="mb ghost sm">＋ 控除を追加</span>
+                <span class="mb ghost sm">キャンセル</span>
+                <span class="mb pri sm">保存</span>
+              </div>
+              <span class="pin admin" data-k="s2-9">9</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ LEGENDS ============ -->
+    <div>
+      <div class="legpanel on" data-s="1">
+        <div class="leggroup">ヘッダー（右上）</div>
+        <div class="leg admin" data-k="s1-1"><div class="n">1</div><div class="t"><b>👥 メンバー管理<span class="perm a">管理者</span></b><p>登録メンバーの一覧・編集画面（人材マスタ）を開きます。</p></div></div>
+        <div class="leg owner" data-k="s1-2"><div class="n">2</div><div class="t"><b>🏢 自社の担当者<span class="perm o">法人オーナー</span></b><p>自社でビューアにログインできる担当者を、取引先自身で追加・編集できます。</p></div></div>
+        <div class="leg admin" data-k="s1-3"><div class="n">3</div><div class="t"><b>🗂 人材マスタ<span class="perm a">管理者</span></b><p>区分・会社名・電話・インボイス番号を1画面でまとめて管理する中央マスタ。</p></div></div>
+        <div class="leg" data-k="s1-4"><div class="n">4</div><div class="t"><b>📱 電話変更<span class="perm e">誰でも</span></b><p>自分の登録電話番号を変更します。明細はこの電話番号でひもづきます。</p></div></div>
+        <div class="leg" data-k="s1-5"><div class="n">5</div><div class="t"><b>🧾 ｲﾝﾎﾞｲｽ番号<span class="perm e">誰でも</span></b><p>自分の適格請求書の登録番号（T＋13桁）を登録・変更。会計マスタへ自動反映されます。</p></div></div>
+        <div class="leg" data-k="s1-6"><div class="n">6</div><div class="t"><b>ログアウト<span class="perm e">誰でも</span></b><p>ビューアからログアウトします。</p></div></div>
+        <div class="leggroup">ツールバー（対象月・PDF）</div>
+        <div class="leg" data-k="s1-7"><div class="n">7</div><div class="t"><b>対象月<span class="perm e">誰でも</span></b><p>表示する月を選びます。過去の月もさかのぼれます。</p></div></div>
+        <div class="leg" data-k="s1-8"><div class="n">8</div><div class="t"><b>読み込み<span class="perm e">誰でも</span></b><p>選んだ月の明細を3ツール横断で取得して表示します。</p></div></div>
+        <div class="leg" data-k="s1-9"><div class="n">9</div><div class="t"><b>📄 サマリーPDF<span class="perm e">誰でも</span></b><p>表示中の合計サマリーをPDFで出力します。</p></div></div>
+        <div class="leg" data-k="s1-10"><div class="n">10</div><div class="t"><b>📦 全部一括PDF<span class="perm e">誰でも</span></b><p>各ツールの明細をまとめて1つのPDFに出力します。</p></div></div>
+        <div class="leg admin" data-k="s1-11"><div class="n">11</div><div class="t"><b>管理者: 任意電話検索<span class="perm a">管理者</span></b><p>ONにすると、下に他人の明細を検索するバーが出ます。問い合わせ対応用。</p></div></div>
+        <div class="leggroup">他人の明細検索バー（管理者）</div>
+        <div class="leg admin" data-k="s1-12"><div class="n">12</div><div class="t"><b>名前 / 電話で検索<span class="perm a">管理者</span></b><p>名前（部分一致）または電話番号で対象者をしぼり込みます。</p></div></div>
+        <div class="leg admin" data-k="s1-13"><div class="n">13</div><div class="t"><b>検索<span class="perm a">管理者</span></b><p>指定した相手の支払明細を表示します。</p></div></div>
+        <div class="leg admin" data-k="s1-14"><div class="n">14</div><div class="t"><b>📋 取引先一覧（当月）<span class="perm a">管理者</span></b><p>当月の全取引先（個人＝氏名／法人・屋号＝会社名）を3ツール横断で一覧集計します。</p></div></div>
+        <div class="leggroup">明細エリア（結果）</div>
+        <div class="leg" data-k="s1-15"><div class="n">15</div><div class="t"><b>📄 PDF（ツール別）<span class="perm e">誰でも</span></b><p>新聞／アスクル／デリバリー、各ツールの明細を個別にPDF出力します。</p></div></div>
+        <div class="leg" data-k="s1-16"><div class="n">16</div><div class="t"><b>📅 日別を見る<span class="perm e">誰でも</span></b><p>その月の日別内訳を開閉します。</p></div></div>
+        <div class="leg admin" data-k="s1-17"><div class="n">17</div><div class="t"><b>📋 内訳<span class="perm a">管理者</span></b><p>会社別グループの中の支払先ごとの内訳を表示します。</p></div></div>
+        <div class="leg admin" data-k="s1-18"><div class="n">18</div><div class="t"><b>→ 個別/PDF<span class="perm a">管理者</span></b><p>その支払先を個別表示に切り替え、支払通知書PDFを発行します。</p></div></div>
+        <div class="leg admin" data-k="s1-19"><div class="n">19</div><div class="t"><b>📦 法人まとめPDF<span class="perm a">管理者</span></b><p>会社合計＋その会社の全支払先の明細を、1つのPDFにまとめて出力します。</p></div></div>
+      </div>
+
+      <div class="legpanel" data-s="2">
+        <div class="leggroup">ヘッダー</div>
+        <div class="leg admin" data-k="s2-1"><div class="n">1</div><div class="t"><b>← 明細ビューアに戻る<span class="perm a">管理者</span></b><p>メインの明細ビューア画面へ戻ります。</p></div></div>
+        <div class="leggroup">ツールバー（一覧の整備）</div>
+        <div class="leg admin" data-k="s2-2"><div class="n">2</div><div class="t"><b>🔄 再読み込み<span class="perm a">管理者</span></b><p>メンバー一覧を最新の状態に読み直します。</p></div></div>
+        <div class="leg admin" data-k="s2-3"><div class="n">3</div><div class="t"><b>📥 ツールから自動補完<span class="perm a">管理者</span></b><p>各ツール（新聞／アスクル／デリバリー）のデータから、配属現場を自動で補完します。</p></div></div>
+        <div class="leg admin" data-k="s2-4"><div class="n">4</div><div class="t"><b>🏢 会社名を自動補完<span class="perm a">管理者</span></b><p>アスクル／デリバリーの所属法人から会社名を補完。会計マスタにT番号があれば明細にも自動反映。</p></div></div>
+        <div class="leggroup">検索・行操作</div>
+        <div class="leg admin" data-k="s2-5"><div class="n">5</div><div class="t"><b>区分フィルタ / 検索<span class="perm a">管理者</span></b><p>区分（法人／個人／社員）や、名前・電話・会社名でメンバーをしぼり込みます。</p></div></div>
+        <div class="leg admin" data-k="s2-6"><div class="n">6</div><div class="t"><b>📄 明細<span class="perm a">管理者</span></b><p>その人の支払明細をそのまま表示します。</p></div></div>
+        <div class="leg admin" data-k="s2-7"><div class="n">7</div><div class="t"><b>編集<span class="perm a">管理者</span></b><p>区分・会社・電話・インボイス番号・控除を編集する画面を開きます。</p></div></div>
+        <div class="leg owner" data-k="s2-8"><div class="n">8</div><div class="t"><b>オーナー設定 / 解除<span class="perm o">法人オーナー</span></b><p>その人を法人オーナー（自社の担当者を管理できる人）に設定・解除します。</p></div></div>
+        <div class="leggroup">編集モーダル</div>
+        <div class="leg admin" data-k="s2-9"><div class="n">9</div><div class="t"><b>控除の追加 / 保存 / キャンセル<span class="perm a">管理者</span></b><p>控除行を追加しながら内容を編集し、「保存」で確定します。</p></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">💡 <b>使い方</b>：上のタブで画面を切り替え、番号の丸（ピン）または右の説明にマウスを重ねると、対応する場所がハイライトされます。ボタンの色は実際の画面と同じです。<b>金額・氏名・屋号はダミー</b>です。</div>
+</div>
+
+<script>
+  const tabs=[...document.querySelectorAll('.tab')];
+  const screens=[...document.querySelectorAll('.screen')];
+  const legs=[...document.querySelectorAll('.legpanel')];
+  tabs.forEach(t=>t.addEventListener('click',()=>{
+    const s=t.dataset.s;
+    tabs.forEach(x=>x.classList.toggle('on',x===t));
+    screens.forEach(x=>x.classList.toggle('on',x.dataset.s===s));
+    legs.forEach(x=>x.classList.toggle('on',x.dataset.s===s));
+  }));
+
+  function wire(){
+    document.querySelectorAll('.pin').forEach(pin=>{
+      const k=pin.dataset.k;
+      const row=document.querySelector(`.leg[data-k="${k}"]`);
+      const on=()=>{pin.classList.add('act'); if(row)row.classList.add('act');};
+      const off=()=>{pin.classList.remove('act'); if(row)row.classList.remove('act');};
+      pin.addEventListener('mouseenter',on); pin.addEventListener('mouseleave',off);
+      if(row){
+        row.addEventListener('mouseenter',on); row.addEventListener('mouseleave',off);
+        row.addEventListener('click',()=>{pin.scrollIntoView({block:'center',behavior:'smooth'});});
+      }
+    });
+  }
+  wire();
+</script>
