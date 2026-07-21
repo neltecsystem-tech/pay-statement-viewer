@@ -91,7 +91,19 @@
   .mb.pri{background:var(--accent);color:#fff;border-color:transparent;}
   .mb.sky{background:#0ea5e9;color:#fff;border-color:transparent;}
   .mb.ghost{background:transparent;color:var(--ink-sub);border-style:dashed;}
+  .mb.warn{background:#f59e0b;color:#fff;border-color:transparent;}
   .mb.sm{font-size:10px;padding:5px 8px;}
+  .acceptbar{border:1px solid #93c5fd;background:#eff6ff;border-radius:11px;padding:11px 13px;
+    display:flex;flex-direction:column;gap:6px;}
+  .acceptbar .ab-h{font-size:12.5px;font-weight:800;color:#1d4ed8;}
+  .acceptbar .ab-t{font-size:10.5px;color:var(--ink-sub);line-height:1.5;}
+  .acceptbar .ab-t b{color:#1d4ed8;}
+  .acceptbar .mb{align-self:flex-start;}
+  @media (prefers-color-scheme:dark){ .acceptbar{background:#12233f;border-color:#2b4a7a;} .acceptbar .ab-h,.acceptbar .ab-t b{color:#93c5fd;} }
+  :root[data-theme="dark"] .acceptbar{background:#12233f;border-color:#2b4a7a;}
+  :root[data-theme="dark"] .acceptbar .ab-h,:root[data-theme="dark"] .acceptbar .ab-t b{color:#93c5fd;}
+  :root[data-theme="light"] .acceptbar{background:#eff6ff;border-color:#93c5fd;}
+  :root[data-theme="light"] .acceptbar .ab-h,:root[data-theme="light"] .acceptbar .ab-t b{color:#1d4ed8;}
 
   /* ---- spotlight ---- */
   .layer-main.touring .dimmable{opacity:.16;filter:saturate(.4) blur(1.2px);transition:opacity .45s,filter .45s;}
@@ -180,16 +192,21 @@
             <span class="mb sky" id="t-sumpdf">📄 サマリーPDF</span>
             <span class="mb ghost" id="t-allpdf">📦 全部一括PDF</span>
           </div>
+          <div class="acceptbar dimmable" id="t-accept">
+            <div class="ab-h">📄 支払通知書 発行済み（ご確認ください）</div>
+            <div class="ab-t">発行日 2026/7/31。内容にご異議がある場合は <b>2026/8/3 まで（発行から3日以内）</b>に下記より申し立ててください。3日以内にご連絡がなければ発行から4日目に受領確定します。</div>
+            <span class="mb warn sm" id="t-object">⚠ 異議申し立て</span>
+          </div>
           <div class="cards">
             <div class="card2 dimmable" id="t-card">
-              <div class="c-top"><b>📦 アスクル</b><span class="mb ghost sm" id="t-toolpdf">📄 PDF</span></div>
+              <div class="c-top"><b>📦 アスクル</b></div>
               <div class="rowline"><span class="muted">外注費（税抜）</span><b>¥298,000</b></div>
               <div class="rowline"><span class="muted">消費税（適格10%）</span><b>¥29,800</b></div>
               <div class="rowline"><span class="muted">控除</span><b>−¥35,670</b></div>
               <span class="mb ghost sm" style="align-self:flex-start;" id="t-daily">📅 日別を見る</span>
             </div>
             <div class="card2 dimmable">
-              <div class="c-top"><b>📰 新聞シフト</b><span class="mb ghost sm">📄 PDF</span></div>
+              <div class="c-top"><b>📰 新聞シフト</b></div>
               <div class="rowline"><span class="muted">外注費（税抜）</span><b>¥142,000</b></div>
               <div class="rowline"><span class="muted">消費税</span><b>¥14,200</b></div>
               <div class="rowline"><span class="muted">控除</span><b>−¥8,400</b></div>
@@ -233,13 +250,17 @@
       text:'「読み込み」を押すと、その月の明細を<b>3ツール横断</b>で取得して表示します。' },
     { layer:'main', target:'t-card', title:'③ 明細を確認',
       text:'業務ごとに、外注費（税抜）・消費税・控除が並びます。<b>適格請求書なら消費税10%が上乗せ</b>されます。' },
-    { layer:'main', target:'t-daily', title:'④ 内訳・PDFを見る',
-      text:'「📅 日別を見る」で日ごとの内訳を確認。「📄 PDF」で<b>ツールごとの明細</b>を保存・印刷できます。' },
-    { layer:'main', target:'t-sumpdf', title:'⑤ まとめてPDF保存',
-      text:'「📄 サマリーPDF」「📦 全部一括PDF」で、<b>支払通知書をまとめてPDF</b>にできます。' },
-    { layer:'main', target:'t-invoice', title:'⑥ インボイス番号を登録',
+    { layer:'main', target:'t-daily', title:'④ 日別の内訳を見る',
+      text:'「📅 日別を見る」で、その月の日ごとの内訳を開いて確認できます。' },
+    { layer:'main', target:'t-sumpdf', title:'⑤ PDFで保存',
+      text:'「📄 サマリーPDF」または「📦 全部一括PDF」で、<b>支払通知書をまとめてPDF</b>にできます（保存・印刷用）。' },
+    { layer:'main', target:'t-accept', title:'⑥ 通知メールが届いたら（新機能）',
+      text:'支払通知書が発行されると<b>お知らせメール</b>が届き、この画面に<b>「発行済み」バー</b>が表示されます。まず内容をご確認ください。' },
+    { layer:'main', target:'t-object', title:'⑦ 内容が違うときは異議申し立て',
+      text:'記載に相違があれば<b>発行から3日以内</b>に「⚠ 異議申し立て」でご連絡を。<b>3日以内に連絡がなければ4日目に自動で受領確定</b>します。' },
+    { layer:'main', target:'t-invoice', title:'⑧ インボイス番号を登録',
       text:'「🧾 ｲﾝﾎﾞｲｽ番号」から<b>T＋13桁</b>を登録。会計に自動反映され、正式名称で通知書に載ります。' },
-    { layer:'main', target:'t-phone', title:'⑦ 登録情報の変更',
+    { layer:'main', target:'t-phone', title:'⑨ 登録情報の変更',
       text:'「📱 電話変更」で登録番号を更新できます。明細は<b>電話番号でひもづき</b>ます。困ったら担当者へ。' }
   ];
 

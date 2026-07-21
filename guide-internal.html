@@ -289,7 +289,20 @@
       </div>`
     },
     {
-      kicker:'自動化の方向', step:7,
+      kicker:'通知メール／受領', step:7,
+      title:'発行お知らせメール＆受領ワークフロー',
+      lead:'支払通知書を発行するとお知らせメールを自動送信。発行から3日以内に異議がなければ、4日目に自動で受領確定します（pay-notify／pay-auto-accept）。',
+      pts:['<b>dry_run→send</b>で対象確認→一斉送信','異議は<b>確定保留</b>（pay-statement-object）','3日無連絡→<b>4日目に自動受領確定</b>'],
+      vis:`<div class="pipe">
+        <div class="pnode"><div class="ic">✉️</div><div><b>発行＝お知らせメール送信</b><p>対象者へ一斉送信＋pending記録</p></div></div>
+        <div class="parrow">▼</div>
+        <div class="pnode k2"><div class="ic">🕒</div><div><b>3日間の異議受付</b><p>相違あれば「⚠異議申し立て」→確定保留</p></div></div>
+        <div class="parrow">▼</div>
+        <div class="pnode"><div class="ic">✅</div><div><b>4日目に自動受領確定</b><p>異議なしは cron が accepted 化</p></div></div>
+      </div>`
+    },
+    {
+      kicker:'自動化の方向', step:8,
       title:'毎月の確定を自動連携へ',
       lead:'ヤマト・アスクルは配送完了、新聞・SBS・東スポはシフトを基礎データに、毎月の確定→連携の自動化を進めています。',
       pts:['荷主別の<b>基礎データで自動確定</b>','5日／25日の確定サイクルを想定','新聞の全自動確定は移植を進行中'],

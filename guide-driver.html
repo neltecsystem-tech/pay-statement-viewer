@@ -256,7 +256,7 @@
     {
       kicker:'PDF保存', step:4,
       title:'支払通知書をPDFで保存',
-      lead:'「個別 / PDF」ボタンから、支払通知書を保存・印刷できます。金額は会計と同じ計算式（お支払額＝(外注費−計算手数料)×1.1−控除）です。',
+      lead:'「📄 サマリーPDF」「📦 全部一括PDF」から、支払通知書を保存・印刷できます。金額は会計と同じ計算式（お支払額＝(外注費−計算手数料)×1.1−控除）です。',
       pts:['ワンタップで<b>PDF出力</b>','会計ツールと<b>金額・体裁が一致</b>','会社まとめ（法人）のPDFも発行'],
       vis:`<div class="paper">
         <h4>支 払 通 知 書</h4><div class="sub">2026年7月分 ／ 御中</div>
@@ -268,7 +268,22 @@
       </div>`
     },
     {
-      kicker:'インボイス', step:5,
+      kicker:'通知メール', step:5,
+      title:'発行されたらメールでお知らせ',
+      lead:'支払通知書が発行されると、お知らせメールが届きます。ビューアを開くと「発行済み」バーが出るので、まず内容をご確認ください。',
+      pts:['発行時に<b>お知らせメール</b>が届く','内容に相違があれば<b>3日以内に異議申し立て</b>','連絡がなければ<b>4日目に自動で受領確定</b>'],
+      vis:`<div class="device"><div class="dev-top"><span class="dot"></span>📬 お知らせ</div>
+        <div class="dev-body">
+          <div style="border:1px solid #93c5fd;background:#eff6ff;border-radius:10px;padding:12px;">
+            <div style="font-size:13px;font-weight:800;color:#1d4ed8;">📄 支払通知書 発行済み</div>
+            <div style="font-size:11px;color:#475569;margin:5px 0 9px;line-height:1.5;">2026年7月分が発行されました。ご異議は <b style="color:#1d4ed8;">8/3まで（発行から3日以内）</b>にご連絡ください。</div>
+            <div style="display:inline-block;background:#f59e0b;color:#fff;font-size:12px;font-weight:700;padding:8px 13px;border-radius:8px;">⚠ 異議申し立て</div>
+          </div>
+          <div style="display:flex;justify-content:center;margin-top:4px;"><span class="chip">✓ 3日過ぎれば受領確定</span></div>
+        </div></div>`
+    },
+    {
+      kicker:'インボイス', step:6,
       title:'インボイス番号は自分で登録',
       lead:'登録番号（T＋13桁）を入力して保存するだけ。会計に自動で反映され、正式名称で通知書に記載されます。',
       pts:['<b>T＋13桁</b>を入力して保存','会計マスタに<b>自動反映</b>','適格請求書として通知書に記載'],
@@ -280,7 +295,7 @@
         </div></div>`
     },
     {
-      kicker:'登録情報', step:6,
+      kicker:'登録情報', step:7,
       title:'電話番号の変更もかんたん',
       lead:'明細はあなたの電話番号でひもづいています。番号が変わったら「📱電話変更」から更新してください。',
       pts:['「<b>📱電話変更</b>」で番号を更新','明細は電話番号でひもづく','変更後もこれまでの明細はそのまま'],
