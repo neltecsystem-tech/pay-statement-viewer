@@ -761,7 +761,7 @@ function renderCompanyAgg(company, ym, tools){
   // 無ければ支払先(氏名)ごとに完全一致で拾う。
   let {items:dedItems}=accCompanyDeduction(company,ym);
   if(!dedItems.length){
-    payees.forEach(p=>{ const d=accDeductionFor(p.name,ym); if(d.lease>0)dedItems.push({name:`${p.name}（車両リース料）`,amount:d.lease}); if(d.loan>0)dedItems.push({name:`${p.name}（貸付金返済）`,amount:d.loan}); });
+    payees.forEach(p=>{ const d=accDeductionFor(p.name,ym); if(d.lease>0)dedItems.push({name:`${p.name}（車両リース料）`,amount:d.lease}); if(d.advance>0)dedItems.push({name:`${p.name}（立替金）`,amount:d.advance}); if(d.calc_fee>0)dedItems.push({name:`${p.name}（計算手数料）`,amount:d.calc_fee}); if(d.loan>0)dedItems.push({name:`${p.name}（貸付金返済）`,amount:d.loan}); });
   }
   const dedTotal=dedItems.reduce((a,d)=>a+d.amount,0);
   // 適格判定(会計マスタ invPartners)→適格なら消費税(10%)を上乗せ(支払通知書PDFと一致)。外注費(税抜)=ツール合計。
@@ -1022,13 +1022,18 @@ function _accDedForRow(row,month){
   const loanOv=new Map();
   (_accDed.ov||[]).forEach(o=>{if(nmKey(o.name||'')===key&&o.loan!=null&&String(o.loan)!==''&&o.month)loanOv.set(o.month,Math.round(Number(o.loan)||0));});
   const loan=_loanDue(row,month,loanOv);
-  return {lease,loan,total:lease+loan};
+  // 立替金・計算手数料(月額・会計マスタ acc_driver_deductions)。月別上書きがあれば優先。
+  const ao=(_accDed.ov||[]).find(o=>nmKey(o.name||'')===key&&o.month===month&&o.advance!=null&&String(o.advance)!=='');
+  const advance=ao?Math.round(Number(ao.advance)||0):Math.round(Number(row.advance_monthly)||0);
+  const co=(_accDed.ov||[]).find(o=>nmKey(o.name||'')===key&&o.month===month&&o.calc_fee!=null&&String(o.calc_fee)!=='');
+  const calc_fee=co?Math.round(Number(co.calc_fee)||0):Math.round(Number(row.calc_fee_monthly)||0);
+  return {lease,loan,advance,calc_fee,total:lease+loan+advance+calc_fee};
 }
-// 取引先名(個人=氏名)を完全一致で照合 → {lease,loan,total}
+// 取引先名(個人=氏名)を完全一致で照合 → {lease,loan,advance,calc_fee,total}
 function accDeductionFor(name,month){
-  const key=nmKey(name||'');if(!key)return {lease:0,loan:0,total:0};
+  const key=nmKey(name||'');if(!key)return {lease:0,loan:0,advance:0,calc_fee:0,total:0};
   const row=(_accDed.rows||[]).find(r=>nmKey(r.name||'')===key);
-  return row?_accDedForRow(row,month):{lease:0,loan:0,total:0};
+  return row?_accDedForRow(row,month):{lease:0,loan:0,advance:0,calc_fee:0,total:0};
 }
 // 法人: 会社名を部分一致で照合し、該当する全取引先行を合算 (会社名行・会社配下の個別行の両方を拾う)
 function accCompanyDeduction(company,month){
@@ -1038,14 +1043,18 @@ function accCompanyDeduction(company,month){
     if(!nmKey(row.name||'').includes(key))return;
     const d=_accDedForRow(row,month);
     if(d.lease>0)items.push({name:`${row.name}（車両リース料）`,amount:d.lease});
+    if(d.advance>0)items.push({name:`${row.name}（立替金）`,amount:d.advance});
+    if(d.calc_fee>0)items.push({name:`${row.name}（計算手数料）`,amount:d.calc_fee});
     if(d.loan>0)items.push({name:`${row.name}（貸付金返済）`,amount:d.loan});
   });
   return {items,total:items.reduce((a,x)=>a+x.amount,0)};
 }
-// 明細ビューア用の差引項目配列に変換 (車両リース料 / 貸付金返済)
+// 明細ビューア用の差引項目配列に変換 (車両リース料 / 立替金 / 計算手数料 / 貸付金返済)
 function accDedItems(name,month){
   const d=accDeductionFor(name,month);const items=[];
   if(d.lease>0)items.push({label:'車両リース料',amount:d.lease,active:true});
+  if(d.advance>0)items.push({label:'立替金',amount:d.advance,active:true});
+  if(d.calc_fee>0)items.push({label:'計算手数料',amount:d.calc_fee,active:true});
   if(d.loan>0)items.push({label:'貸付金返済',amount:d.loan,active:true});
   return items;
 }
