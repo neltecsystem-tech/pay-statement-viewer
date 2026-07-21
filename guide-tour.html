@@ -94,12 +94,21 @@
   .mb.sm{font-size:10px;padding:5px 8px;}
 
   /* ---- spotlight ---- */
-  .layer-main.touring .dimmable{opacity:.28;filter:saturate(.55);transition:opacity .45s,filter .45s;}
-  .spot{position:relative;z-index:4;opacity:1!important;filter:none!important;
-    outline:3px solid var(--accent);outline-offset:3px;border-radius:10px;
-    box-shadow:0 0 0 7px var(--accent-soft),0 10px 30px rgba(79,70,229,.28);
-    animation:pulse 1.8s ease-in-out infinite;}
-  @keyframes pulse{0%,100%{outline-color:var(--accent);}50%{outline-color:var(--accent-2);}}
+  .layer-main.touring .dimmable{opacity:.16;filter:saturate(.4) blur(1.2px);transition:opacity .45s,filter .45s;}
+  .spot{position:relative;z-index:5;opacity:1!important;filter:none!important;transform:scale(1.1);
+    outline:3px solid var(--accent);outline-offset:4px;border-radius:11px;background:var(--surface);
+    box-shadow:0 0 0 4px #fff, 0 0 0 8px var(--accent), 0 0 0 15px var(--accent-soft),
+      0 14px 40px rgba(79,70,229,.5);
+    animation:pop 1.5s ease-in-out infinite;}
+  @keyframes pop{
+    0%,100%{transform:scale(1.1);box-shadow:0 0 0 4px #fff,0 0 0 8px var(--accent),0 0 0 15px var(--accent-soft),0 14px 40px rgba(79,70,229,.5);}
+    50%{transform:scale(1.17);box-shadow:0 0 0 4px #fff,0 0 0 9px var(--accent-2),0 0 0 22px var(--accent-soft),0 18px 48px rgba(79,70,229,.6);}
+  }
+  .spot::after{content:"👆 ここ";position:absolute;top:-15px;right:-12px;z-index:6;
+    background:var(--accent);color:#fff;font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;
+    box-shadow:0 4px 12px rgba(79,70,229,.5);white-space:nowrap;pointer-events:none;
+    animation:bob 1.5s ease-in-out infinite;}
+  @keyframes bob{0%,100%{transform:translateY(0);}50%{transform:translateY(-4px);}}
 
   /* ---- caption ---- */
   .caption{position:absolute;left:16px;right:16px;bottom:16px;z-index:6;background:var(--surface);
@@ -129,7 +138,7 @@
   .hint b{color:var(--accent);}
 
   @media (prefers-reduced-motion:reduce){
-    .layer{transition:opacity .2s;} .spot{animation:none;} .progress .bar{transition:none!important;}
+    .layer{transition:opacity .2s;} .spot,.spot::after{animation:none;} .progress .bar{transition:none!important;}
   }
 </style>
 
