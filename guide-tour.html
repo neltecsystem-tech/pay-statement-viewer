@@ -1,0 +1,299 @@
+<title>統合支払明細ビューア｜画面ツアー（全体表示で解説）</title>
+<style>
+  :root{
+    --jp:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic UI","Yu Gothic","Noto Sans JP",Meiryo,system-ui,sans-serif;
+    --accent:#4f46e5; --accent-2:#6366f1; --accent-soft:#eef0ff;
+    --ground:#eef0f7; --surface:#ffffff; --surface-2:#f6f7fc; --panel:#fbfcff;
+    --ink:#1b1e2e; --ink-sub:#5a6076; --border:#e2e5f0; --line:#eceef6;
+    --shadow:0 14px 46px rgba(30,34,70,.14); --shadow-sm:0 3px 12px rgba(30,34,70,.08);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --accent:#818cf8; --accent-2:#6366f1; --accent-soft:#20244a;
+      --ground:#0c0e1a; --surface:#161930; --surface-2:#1d2138; --panel:#141730;
+      --ink:#eef0f8; --ink-sub:#a3a9c4; --border:#2b2f4c; --line:#242844;
+      --shadow:0 16px 50px rgba(0,0,0,.55); --shadow-sm:0 3px 14px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="light"]{
+    --accent:#4f46e5; --accent-2:#6366f1; --accent-soft:#eef0ff;
+    --ground:#eef0f7; --surface:#ffffff; --surface-2:#f6f7fc; --panel:#fbfcff;
+    --ink:#1b1e2e; --ink-sub:#5a6076; --border:#e2e5f0; --line:#eceef6;
+    --shadow:0 14px 46px rgba(30,34,70,.14); --shadow-sm:0 3px 12px rgba(30,34,70,.08);
+  }
+  :root[data-theme="dark"]{
+    --accent:#818cf8; --accent-2:#6366f1; --accent-soft:#20244a;
+    --ground:#0c0e1a; --surface:#161930; --surface-2:#1d2138; --panel:#141730;
+    --ink:#eef0f8; --ink-sub:#a3a9c4; --border:#2b2f4c; --line:#242844;
+    --shadow:0 16px 50px rgba(0,0,0,.55); --shadow-sm:0 3px 14px rgba(0,0,0,.4);
+  }
+
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--jp);
+    -webkit-font-smoothing:antialiased;line-height:1.6;}
+  .wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:16px;padding:22px 18px 40px;}
+  .brandbar{width:100%;max-width:1120px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+  .brand{display:flex;align-items:center;gap:11px;}
+  .brand .logo{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font-size:19px;box-shadow:var(--shadow-sm);}
+  .brand b{font-size:15px;} .brand span{display:block;font-size:11.5px;color:var(--ink-sub);margin-top:1px;}
+  .audience{font-size:11.5px;font-weight:700;letter-spacing:.05em;color:var(--accent);background:var(--accent-soft);
+    padding:6px 13px;border-radius:999px;}
+
+  .stage{width:100%;max-width:1120px;aspect-ratio:16/9;position:relative;background:var(--surface-2);
+    border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;}
+  .layer{position:absolute;inset:0;opacity:0;visibility:hidden;transition:opacity .5s;}
+  .layer.on{opacity:1;visibility:visible;}
+
+  /* ---- login layer ---- */
+  .layer-login{display:grid;place-items:center;padding:20px;background:
+    radial-gradient(120% 120% at 50% 0%, var(--accent-soft), var(--surface-2) 60%);}
+  .logincard{width:min(88%,330px);background:var(--surface);border:1px solid var(--border);border-radius:16px;
+    box-shadow:var(--shadow);padding:26px 24px;text-align:center;}
+  .logincard h3{margin:0 0 4px;color:var(--accent);font-size:clamp(15px,2vw,19px);}
+  .logincard .sub{font-size:11.5px;color:var(--ink-sub);margin-bottom:16px;}
+  .logincard .f{text-align:left;margin-bottom:11px;}
+  .logincard label{font-size:11px;color:var(--ink-sub);font-weight:600;display:block;margin-bottom:4px;}
+  .logincard .box{border:1px solid var(--border);border-radius:9px;padding:9px 11px;font-size:12.5px;
+    background:var(--surface-2);color:var(--ink-sub);}
+  .logincard .go{margin-top:4px;background:var(--accent);color:#fff;border-radius:9px;padding:11px;font-weight:700;font-size:14px;}
+
+  /* ---- main screen mock ---- */
+  .layer-main{padding:clamp(12px,2vw,22px);}
+  .mock{height:100%;background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;
+    display:flex;flex-direction:column;box-shadow:var(--shadow-sm);}
+  .m-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
+    padding:clamp(10px,1.4vw,15px);border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  .m-title{font-size:clamp(12px,1.5vw,15px);font-weight:800;}
+  .m-title small{display:block;font-size:clamp(9px,1vw,11px);color:var(--ink-sub);font-weight:500;}
+  .m-btns{display:flex;gap:6px;flex-wrap:wrap;}
+  .m-body{padding:clamp(10px,1.4vw,15px);display:flex;flex-direction:column;gap:clamp(8px,1.2vw,12px);overflow:auto;}
+  .toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:clamp(8px,1vw,11px);
+    border:1px solid var(--line);border-radius:10px;background:var(--surface-2);}
+  .lbl{font-size:11.5px;color:var(--ink-sub);font-weight:600;}
+  .inp{border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:11.5px;background:var(--surface);
+    color:var(--ink-sub);}
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:clamp(8px,1.2vw,12px);}
+  @media (max-width:560px){ .cards{grid-template-columns:1fr;} }
+  .card2{border:1px solid var(--line);border-radius:11px;background:var(--panel);padding:clamp(9px,1.2vw,13px);
+    display:flex;flex-direction:column;gap:7px;}
+  .c-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .c-top b{font-size:12.5px;} .muted{color:var(--ink-sub);font-size:10.5px;}
+  .rowline{display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px dashed var(--line);
+    font-variant-numeric:tabular-nums;} .rowline:last-child{border-bottom:0;} .rowline b{font-weight:700;}
+  .totbar{display:flex;justify-content:space-between;align-items:center;background:var(--accent-soft);
+    border-radius:10px;padding:10px 13px;font-variant-numeric:tabular-nums;}
+  .totbar .lb{font-size:11.5px;color:var(--accent);font-weight:700;} .totbar .am{font-size:clamp(15px,1.8vw,19px);font-weight:800;color:var(--accent);}
+
+  .mb{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:7px 10px;border-radius:8px;
+    border:1px solid var(--border);background:var(--surface);color:var(--ink);white-space:nowrap;box-shadow:var(--shadow-sm);}
+  .mb.sec{background:var(--surface-2);color:var(--ink-sub);}
+  .mb.pri{background:var(--accent);color:#fff;border-color:transparent;}
+  .mb.sky{background:#0ea5e9;color:#fff;border-color:transparent;}
+  .mb.ghost{background:transparent;color:var(--ink-sub);border-style:dashed;}
+  .mb.sm{font-size:10px;padding:5px 8px;}
+
+  /* ---- spotlight ---- */
+  .layer-main.touring .dimmable{opacity:.28;filter:saturate(.55);transition:opacity .45s,filter .45s;}
+  .spot{position:relative;z-index:4;opacity:1!important;filter:none!important;
+    outline:3px solid var(--accent);outline-offset:3px;border-radius:10px;
+    box-shadow:0 0 0 7px var(--accent-soft),0 10px 30px rgba(79,70,229,.28);
+    animation:pulse 1.8s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{outline-color:var(--accent);}50%{outline-color:var(--accent-2);}}
+
+  /* ---- caption ---- */
+  .caption{position:absolute;left:16px;right:16px;bottom:16px;z-index:6;background:var(--surface);
+    border:1px solid var(--border);border-left:5px solid var(--accent);border-radius:13px;box-shadow:var(--shadow);
+    padding:clamp(12px,1.6vw,17px) clamp(14px,1.8vw,20px);display:flex;gap:14px;align-items:flex-start;}
+  .caption .step{background:var(--accent);color:#fff;min-width:30px;height:30px;padding:0 8px;border-radius:9px;
+    display:grid;place-items:center;font-weight:800;font-size:14px;flex:none;font-variant-numeric:tabular-nums;}
+  .caption h3{margin:0 0 3px;font-size:clamp(14px,1.8vw,19px);font-weight:800;}
+  .caption p{margin:0;font-size:clamp(12px,1.4vw,15px);color:var(--ink-sub);}
+  .caption b{color:var(--accent);}
+
+  /* ---- controls ---- */
+  .controls{width:100%;max-width:1120px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  .progress{flex:1;min-width:180px;height:7px;background:var(--border);border-radius:999px;overflow:hidden;}
+  .progress .bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent-2));border-radius:999px;}
+  .dots{display:flex;gap:7px;flex-wrap:wrap;}
+  .dots button{width:11px;height:11px;border-radius:50%;border:0;padding:0;cursor:pointer;background:var(--border);
+    transition:transform .2s,background .2s;} .dots button.on{background:var(--accent);transform:scale(1.25);}
+  .dots button:focus-visible,.ctl:focus-visible{outline:3px solid var(--accent-2);outline-offset:2px;}
+  .ctl{border:1px solid var(--border);background:var(--surface);color:var(--ink);width:40px;height:40px;border-radius:11px;
+    cursor:pointer;font-size:16px;display:grid;place-items:center;box-shadow:var(--shadow-sm);transition:transform .15s;}
+  .ctl:hover{transform:translateY(-1px);}
+  .ctl.play{width:auto;padding:0 18px;gap:8px;font-weight:700;font-size:14px;background:var(--accent);color:#fff;border-color:transparent;}
+  .count{font-size:12.5px;color:var(--ink-sub);font-variant-numeric:tabular-nums;font-weight:600;min-width:42px;text-align:center;}
+  .hint{max-width:1120px;width:100%;font-size:12.5px;color:var(--ink-sub);background:var(--surface);
+    border:1px dashed var(--border);border-radius:12px;padding:11px 15px;display:flex;gap:9px;align-items:center;}
+  .hint b{color:var(--accent);}
+
+  @media (prefers-reduced-motion:reduce){
+    .layer{transition:opacity .2s;} .spot{animation:none;} .progress .bar{transition:none!important;}
+  }
+</style>
+
+<div class="wrap">
+  <div class="brandbar">
+    <div class="brand"><div class="logo">📑</div>
+      <div><b>統合支払明細ビューア｜画面ツアー</b><span>実際の画面のまま、使う場所を光らせて解説</span></div></div>
+    <div class="audience">ドライバー・取引先のみなさま向け</div>
+  </div>
+
+  <div class="stage" id="stage">
+    <!-- login layer -->
+    <div class="layer layer-login" id="layer-login">
+      <div class="logincard">
+        <h3>📑 統合支払明細ビューア</h3>
+        <div class="sub">NexPort と同じメール・パスワードでログイン</div>
+        <div class="f"><label>メールアドレス</label><div class="box">example@neltec.jp</div></div>
+        <div class="f"><label>パスワード</label><div class="box">NexPort と同じパスワード</div></div>
+        <div class="go">ログイン</div>
+      </div>
+    </div>
+
+    <!-- main layer -->
+    <div class="layer layer-main" id="layer-main">
+      <div class="mock">
+        <div class="m-head">
+          <div class="m-title dimmable" id="t-title">📑 統合支払明細ビューア<small>山田 太郎 さん</small></div>
+          <div class="m-btns">
+            <span class="mb sec dimmable" id="t-phone">📱 電話変更</span>
+            <span class="mb sec dimmable" id="t-invoice">🧾 ｲﾝﾎﾞｲｽ番号</span>
+            <span class="mb sec dimmable" id="t-logout">ログアウト</span>
+          </div>
+        </div>
+        <div class="m-body">
+          <div class="toolbar dimmable" id="t-toolbar">
+            <span class="lbl">対象月:</span>
+            <span class="inp" id="t-month">2026-07</span>
+            <span class="mb pri" id="t-load">読み込み</span>
+            <span class="mb sky" id="t-sumpdf">📄 サマリーPDF</span>
+            <span class="mb ghost" id="t-allpdf">📦 全部一括PDF</span>
+          </div>
+          <div class="cards">
+            <div class="card2 dimmable" id="t-card">
+              <div class="c-top"><b>📦 アスクル</b><span class="mb ghost sm" id="t-toolpdf">📄 PDF</span></div>
+              <div class="rowline"><span class="muted">外注費（税抜）</span><b>¥298,000</b></div>
+              <div class="rowline"><span class="muted">消費税（適格10%）</span><b>¥29,800</b></div>
+              <div class="rowline"><span class="muted">控除</span><b>−¥35,670</b></div>
+              <span class="mb ghost sm" style="align-self:flex-start;" id="t-daily">📅 日別を見る</span>
+            </div>
+            <div class="card2 dimmable">
+              <div class="c-top"><b>📰 新聞シフト</b><span class="mb ghost sm">📄 PDF</span></div>
+              <div class="rowline"><span class="muted">外注費（税抜）</span><b>¥142,000</b></div>
+              <div class="rowline"><span class="muted">消費税</span><b>¥14,200</b></div>
+              <div class="rowline"><span class="muted">控除</span><b>−¥8,400</b></div>
+              <span class="mb ghost sm" style="align-self:flex-start;">📅 日別を見る</span>
+            </div>
+          </div>
+          <div class="totbar dimmable" id="t-total"><span class="lb">今月のお支払額（合計）</span><span class="am">¥439,930</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="caption" id="caption">
+      <div class="step" id="cap-step">1</div>
+      <div><h3 id="cap-title">…</h3><p id="cap-text">…</p></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="ctl" id="prev" aria-label="前へ">‹</button>
+    <button class="ctl play" id="play" aria-label="再生・一時停止"><span id="playIcon">❚❚</span><span id="playTxt">再生中</span></button>
+    <button class="ctl" id="next" aria-label="次へ">›</button>
+    <span class="count" id="count">1 / 9</span>
+    <div class="progress"><div class="bar" id="bar"></div></div>
+    <button class="ctl" id="restart" aria-label="最初から">↺</button>
+    <div class="dots" id="dots"></div>
+  </div>
+
+  <div class="hint">🎬 <span><b>画面録画</b>すると、実際の画面を使った説明動画（MP4）になります。全画面表示にしてから録画してください。</span></div>
+</div>
+
+<script>
+  // layer: 'login' | 'main' ; target: element id on main screen (null=画面全体)
+  const steps = [
+    { layer:'login', target:null, title:'まずはログイン',
+      text:'<b>NexPort と同じメール・パスワード</b>でログインします。新しいIDを覚える必要はありません。' },
+    { layer:'main', target:'t-title', title:'これがあなたの明細画面',
+      text:'ログインすると、新聞・アスクル・デリバリーの<b>お支払明細がひとつの画面</b>にまとまって表示されます。' },
+    { layer:'main', target:'t-month', title:'① 見たい月をえらぶ',
+      text:'「対象月」で表示したい月を選びます。<b>過去の月</b>もさかのぼって確認できます。' },
+    { layer:'main', target:'t-load', title:'② 読み込み',
+      text:'「読み込み」を押すと、その月の明細を<b>3ツール横断</b>で取得して表示します。' },
+    { layer:'main', target:'t-card', title:'③ 明細を確認',
+      text:'業務ごとに、外注費（税抜）・消費税・控除が並びます。<b>適格請求書なら消費税10%が上乗せ</b>されます。' },
+    { layer:'main', target:'t-daily', title:'④ 内訳・PDFを見る',
+      text:'「📅 日別を見る」で日ごとの内訳を確認。「📄 PDF」で<b>ツールごとの明細</b>を保存・印刷できます。' },
+    { layer:'main', target:'t-sumpdf', title:'⑤ まとめてPDF保存',
+      text:'「📄 サマリーPDF」「📦 全部一括PDF」で、<b>支払通知書をまとめてPDF</b>にできます。' },
+    { layer:'main', target:'t-invoice', title:'⑥ インボイス番号を登録',
+      text:'「🧾 ｲﾝﾎﾞｲｽ番号」から<b>T＋13桁</b>を登録。会計に自動反映され、正式名称で通知書に載ります。' },
+    { layer:'main', target:'t-phone', title:'⑦ 登録情報の変更',
+      text:'「📱 電話変更」で登録番号を更新できます。明細は<b>電話番号でひもづき</b>ます。困ったら担当者へ。' }
+  ];
+
+  const DUR = 7000;
+  const layerLogin = document.getElementById('layer-login');
+  const layerMain = document.getElementById('layer-main');
+  const capStep = document.getElementById('cap-step');
+  const capTitle = document.getElementById('cap-title');
+  const capText = document.getElementById('cap-text');
+  const bar = document.getElementById('bar');
+  const count = document.getElementById('count');
+  const dotsWrap = document.getElementById('dots');
+  const playIcon = document.getElementById('playIcon');
+  const playTxt = document.getElementById('playTxt');
+  const reduce = matchMedia('(prefers-reduced-motion:reduce)').matches;
+  let idx = 0, playing = true, timer = null;
+
+  steps.forEach((s,i)=>{
+    const b=document.createElement('button');
+    b.setAttribute('aria-label',`ステップ${i+1}`);
+    b.addEventListener('click',()=>go(i));
+    dotsWrap.appendChild(b);
+  });
+  const dotEls=[...dotsWrap.children];
+
+  function clearSpot(){ document.querySelectorAll('.spot').forEach(e=>e.classList.remove('spot')); }
+  function render(){
+    const s=steps[idx];
+    layerLogin.classList.toggle('on', s.layer==='login');
+    layerMain.classList.toggle('on', s.layer==='main');
+    clearSpot();
+    if(s.layer==='main'){
+      layerMain.classList.add('touring');
+      if(s.target){ const el=document.getElementById(s.target); if(el) el.classList.add('spot'); }
+      else { layerMain.classList.remove('touring'); }
+    } else {
+      layerMain.classList.remove('touring');
+    }
+    capStep.textContent = s.layer==='login' ? '▶' : idx;
+    capTitle.textContent = s.title;
+    capText.innerHTML = s.text;
+    count.textContent = `${idx+1} / ${steps.length}`;
+    dotEls.forEach((d,i)=>d.classList.toggle('on',i===idx));
+  }
+  function startBar(){
+    bar.style.transition='none'; bar.style.width='0%'; void bar.offsetWidth;
+    if(!reduce && playing){ bar.style.transition=`width ${DUR}ms linear`; bar.style.width='100%'; }
+    else if(!playing){ bar.style.width=getComputedStyle(bar).width; }
+  }
+  function schedule(){ clearTimeout(timer); if(playing) timer=setTimeout(()=>go(idx+1),DUR); }
+  function go(n){ idx=(n+steps.length)%steps.length; render(); startBar(); schedule(); }
+  function setPlaying(p){
+    playing=p; playIcon.textContent=p?'❚❚':'▶'; playTxt.textContent=p?'再生中':'一時停止中';
+    if(p){ startBar(); schedule(); } else { clearTimeout(timer); bar.style.transition='none'; bar.style.width=getComputedStyle(bar).width; }
+  }
+  document.getElementById('play').addEventListener('click',()=>setPlaying(!playing));
+  document.getElementById('next').addEventListener('click',()=>go(idx+1));
+  document.getElementById('prev').addEventListener('click',()=>go(idx-1));
+  document.getElementById('restart').addEventListener('click',()=>{go(0);setPlaying(true);});
+  addEventListener('keydown',e=>{
+    if(e.key===' '){e.preventDefault();setPlaying(!playing);}
+    else if(e.key==='ArrowRight')go(idx+1); else if(e.key==='ArrowLeft')go(idx-1);
+  });
+
+  render(); startBar(); schedule();
+</script>
