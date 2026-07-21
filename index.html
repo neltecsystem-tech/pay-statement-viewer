@@ -1420,10 +1420,16 @@ function buildSummaryHtml(){
   const deductionTotal=deds.reduce((s,d)=>s+(Number(d.amount)||0),0);
   const inv=resolveInvoiceNo(targetProfile,ym);
   const hasTax=!!(inv&&inv.no);
-  // 外注費(税抜)=ツール合計。適格なら消費税(10%)を上乗せ・お支払額=外注費×1.1−控除。非適格=税表記なし。
+  // 会計と同一式: 外注費(税抜J)=ツール合計 / 計算手数料(L)=控除マスタ。
+  //   消費税=(J−L)×0.1 / お支払額=(J−L)×1.1−その他控除。
   const gaityu=toolTotal;
-  const zei=hasTax?Math.round(gaityu*0.1):0;
-  const payAmount=gaityu+zei-deductionTotal;   // お支払額 / 合計金額
+  const calcFeeDeds=deds.filter(d=>/計算手数料/.test(d.label||''));
+  const otherDeds=deds.filter(d=>!/計算手数料/.test(d.label||''));
+  const calcFee=calcFeeDeds.reduce((a,d)=>a+(Number(d.amount)||0),0);
+  const otherDedTotal=otherDeds.reduce((a,d)=>a+(Number(d.amount)||0),0);
+  const taxBase=gaityu-calcFee;
+  const zei=hasTax?Math.round(taxBase*0.1):0;
+  const payAmount=taxBase+zei-otherDedTotal;   // お支払額 / 合計金額
   // 営業所名: profiles.site → 無ければ新聞シフトの主稼働エリア
   const office=(targetProfile?.site||'').trim()||(shift?.statements?.[0]?.primary_area||'').trim()||'—';
   const mgmtNo=`N-${y}${String(m).padStart(2,'0')}`;
@@ -1440,8 +1446,11 @@ function buildSummaryHtml(){
     <td style="width:110px;padding:8px 12px;font-size:12px;background:#f3f4f6;border:1px solid #d1d5db;font-weight:600;white-space:nowrap;">${label}</td>
     <td style="padding:8px 12px;font-size:12px;border:1px solid #d1d5db;">${val}</td></tr>`;
   const detail='別紙のとおり'+(tools.length?`<span style="font-size:10px;color:#6b7280;">（${tools.map(escHtml).join(' / ')}）</span>`:'');
-  // 金額内訳 テーブル
-  const dedRows=deds.map(d=>`<tr>
+  // 金額内訳 テーブル (計算手数料は消費税の前に▲、その他控除は消費税の後)
+  const calcFeeRow=calcFee>0?`<tr>
+    <td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">計算手数料</td>
+    <td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;color:#b91c1c;min-width:120px;">▲${yen(calcFee)}</td></tr>`:'';
+  const dedRows=otherDeds.map(d=>`<tr>
     <td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">${escHtml(d.label||'差引')}</td>
     <td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;color:#b91c1c;min-width:120px;">▲${yen(d.amount)}</td></tr>`).join('');
 
@@ -1483,6 +1492,7 @@ function buildSummaryHtml(){
     <div style="display:flex;justify-content:flex-end;margin-bottom:18px;">
       <table style="border-collapse:collapse;font-size:13px;min-width:320px;">
         <tr><td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">外注費</td><td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;min-width:120px;">${yen(gaityu)}</td></tr>
+        ${calcFeeRow}
         ${hasTax&&zei>0?`<tr><td style="padding:5px 14px;text-align:right;color:#374151;font-size:12px;">消費税（10%）</td><td style="padding:5px 6px;text-align:right;font-weight:600;font-size:12px;">${yen(zei)}</td></tr>`:''}
         ${dedRows}
         <tr><td style="padding:8px 14px;text-align:right;font-weight:700;${line}border-top:2px solid #111;">合計金額</td><td style="padding:8px 6px;text-align:right;font-weight:800;font-size:16px;${line}border-top:2px solid #111;">${yen(payAmount)}</td></tr>
@@ -1748,16 +1758,23 @@ function buildCompanyCoverHtml(company, ym, payees, dedItems, dedTotal, toolTota
   const registered=invHit?(invHit.registered!==false):false;
   const tno=invHit?(invHit.invoice_number||''):'';
   const hasTax=!!(registered&&tno);
-  // 外注費(税抜)=ツール合計。適格なら消費税(10%)を上乗せ、非適格は税表記なし。控除(会計 車両リース/貸付マスタ)は▲。
+  // 会計と同一式: 外注費(税抜J)=ツール合計 / 計算手数料(L)=控除マスタ。
+  //   消費税=(J−L)×0.1(計算手数料を引いた後に課税) / お支払額=(J−L)×1.1−その他控除。
   const gaityu=toolTotal;
-  const zei=hasTax?Math.round(gaityu*0.1):0;
-  const payAmount=gaityu+zei-dedTotal;
+  const calcFeeItems=dedItems.filter(d=>/計算手数料/.test(d.name));
+  const otherDedItems=dedItems.filter(d=>!/計算手数料/.test(d.name));
+  const calcFee=calcFeeItems.reduce((a,d)=>a+d.amount,0);
+  const otherDedTotal=otherDedItems.reduce((a,d)=>a+d.amount,0);
+  const taxBase=gaityu-calcFee;
+  const zei=hasTax?Math.round(taxBase*0.1):0;
+  const payAmount=taxBase+zei-otherDedTotal;
   const memberCount=payees.length;
   const areas=[...new Set(payees.map(p=>String((p.st&&(p.st.primary_area||p.st.office_name||p.st.shipper))||'').trim()).filter(Boolean))];
   const shipper=areas.join('・')||'—';
   let breakdown=rN('外注費',gaityu,'');
+  if(calcFee>0)breakdown+=rN('計算手数料',calcFee,'-');
   if(hasTax&&zei>0)breakdown+=rN('消費税（10%）',zei,'');
-  dedItems.forEach(d=>{ breakdown+=rN(d.name,d.amount,'-'); });
+  otherDedItems.forEach(d=>{ breakdown+=rN(d.name,d.amount,'-'); });
   const invLine=hasTax?`<div style="font-size:12px;color:#111;margin-top:6px;display:flex;align-items:center;gap:8px;"><span style="display:inline-block;padding:1px 7px;border:1px solid #111;border-radius:3px;font-size:10px;font-weight:700;white-space:nowrap;">適格請求書発行事業者</span><span>登録番号　<span style="font-weight:700;letter-spacing:.5px;">${escHtml(tno)}</span></span></div>`:'';
   return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans','Hiragino Kaku Gothic Pro',sans-serif;color:#111;padding:34px 42px 30px;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
