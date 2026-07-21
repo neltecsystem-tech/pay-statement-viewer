@@ -121,8 +121,8 @@ table.detail tr.sat{background:#fef3c7;}
         <label>対象月:</label>
         <input type="month" id="ym-input" class="input">
         <button class="btn" onclick="loadAll()">読み込み</button>
-        <button class="btn btn-pdf" id="btn-summary-pdf" onclick="downloadSummaryPdf()" disabled style="background:#0ea5e9;">📄 サマリーPDF</button>
-        <button class="btn-ghost" id="btn-all-pdf" onclick="downloadAllPdf()" disabled>📦 全部一括PDF</button>
+        <button class="btn btn-pdf" id="btn-summary-pdf" onclick="downloadSummaryPdf()" disabled style="background:#0ea5e9;display:none;">📄 サマリーPDF</button>
+        <button class="btn btn-pdf" id="btn-all-pdf" onclick="downloadAllPdf()" disabled style="background:#0ea5e9;">📄 明細PDF（一括）</button>
         <span id="admin-toggle-wrap" style="display:none;margin-left:auto;">
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
             <input type="checkbox" id="admin-mode-cb" onchange="toggleAdminMode()"> 管理者: 任意電話検索
@@ -1168,7 +1168,8 @@ function renderResults({shift,askul,delivery,deductions,ym,phone}){
 }
 
 function pdfBtn(source,disabled){
-  return `<button class="btn-ghost" style="margin-left:auto;font-size:11px;padding:4px 8px;" ${disabled?'disabled':''} onclick="downloadToolPdf('${source}')">📄 PDF</button>`;
+  // 個別ツールPDFは廃止(全部一括PDFに統合)。必要な人はブラウザのページ印刷で部分保存可。
+  return '';
 }
 
 function renderShiftCard(r,ym){
