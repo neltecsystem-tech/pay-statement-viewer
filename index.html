@@ -109,6 +109,7 @@ table.detail tr.sat{background:#fef3c7;}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="btn btn-secondary" id="btn-open-admin" onclick="openAdminScreen()" title="メンバー管理" style="display:none;">👥 メンバー管理</button>
+          <button class="btn btn-secondary" id="btn-my-company" onclick="viewMyCompany()" title="自社の明細をまとめて見る(法人集計)" style="display:none;background:#059669;color:#fff;">🏢 自社の明細を見る</button>
           <button class="btn btn-secondary" id="btn-contact-mgr" onclick="openContactMgr()" title="自社の担当者(ビューアにログインできる人)を管理" style="display:none;background:#0891b2;color:#fff;">🏢 自社の担当者</button>
           <button class="btn btn-secondary" id="btn-central-master" onclick="openCentralMaster()" title="人材マスタ: 区分/会社/電話/インボイスを1画面で管理" style="display:none;background:#7c3aed;color:#fff;">🗂 人材マスタ</button>
           <button class="btn btn-secondary" onclick="changePhone()" title="登録電話番号を変更">📱 電話変更</button>
@@ -416,10 +417,24 @@ async function postLogin(){
     if(blocked){ showCorpBlockScreen(); return; }
   }
   // 法人オーナー/管理者には「自社の担当者管理」ボタンを表示
-  const showContact=isAdmin||(window._myCentral&&(window._myCentral.is_company_owner||window._myCentral.category==='法人オーナー'));
+  const isOwnerCentral=window._myCentral&&(window._myCentral.is_company_owner||window._myCentral.category==='法人オーナー');
+  const isContactCentral=window._myCentral&&window._myCentral.is_company_contact;
+  const showContact=isAdmin||isOwnerCentral;
   if(showContact)$('btn-contact-mgr').style.display='inline-flex';
+  // 自社の明細をまとめて見る: 法人オーナー/担当者(非管理者)。自社の会社名を保持。
+  window._myCompany=(window._myCentral&&window._myCentral.company_name)||profile.company||'';
+  if(!isAdmin&&(isOwnerCentral||isContactCentral)&&window._myCompany){
+    $('btn-my-company').style.display='inline-flex';
+  }
   if(profile.phone)loadAll();
 }
+
+// 自社の明細をまとめて見る(法人集計) — 法人オーナー/担当者。EF側で自社(会社名一致)のみ許可。
+window.viewMyCompany=function(){
+  const co=window._myCompany||'';
+  if(!co){alert('自社の会社名が未設定です。管理者にお問い合わせください。');return;}
+  loadCompany(co);
+};
 
 // 自社の担当者(ビューアにログインできる法人配下メンバー)管理 (法人オーナー/管理者)
 async function openContactMgr(){
@@ -429,8 +444,23 @@ async function openContactMgr(){
     const {data,error}=await sb.functions.invoke('staff-set-contact',{body:{action:'list'}});
     if(error||data?.error){ area.innerHTML=`<div class="card" style="color:var(--danger);">読み込み失敗: ${escHtml((data&&data.error)||error?.message||'unknown')}</div>`; return; }
     const members=data.members||[];
+    const amAdmin=profile.role==='admin'||profile.role==='super_admin';
+    const defCompany=data.company||window._myCompany||'';
     let h=`<div class="card"><div style="font-weight:700;font-size:15px;margin-bottom:4px;">🏢 担当者管理（法人配下ドライバー）${data.company?`／${escHtml(data.company)}`:''}</div>
       <div style="font-size:12px;color:var(--text-sub);margin-bottom:12px;line-height:1.7;">下は<b>法人配下ドライバー</b>の一覧です（個人・社員・オーナーは対象外＝元々ログインできます）。「担当者」を ON にした人だけが、この明細ビューアにログインして明細を確認できます。</div>`;
+    // ＋ 自社担当を追加(現場ツールに居ない事務担当などをビューア専用で登録)
+    h+=`<div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:12px;margin-bottom:14px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px;">＋ 自社担当を追加（ビューア専用ログインを発行）</div>
+      <div style="font-size:11px;color:var(--text-sub);margin-bottom:8px;line-height:1.6;">現場ツールに登録のない事務担当などに、明細ビューアのログインを発行します。会社名は<b>${escHtml(defCompany||'(未設定)')}</b>で登録されます。</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+        <input id="ac-name" placeholder="氏名" style="flex:1;min-width:120px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
+        <input id="ac-email" placeholder="メールアドレス" autocapitalize="off" style="flex:1;min-width:160px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
+        <input id="ac-phone" placeholder="電話番号(ログインキー)" inputmode="numeric" style="flex:1;min-width:130px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
+        ${amAdmin?`<input id="ac-company" value="${escHtml(defCompany)}" placeholder="会社名" style="flex:1;min-width:130px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:13px;">`:`<input id="ac-company" type="hidden" value="${escHtml(defCompany)}">`}
+        <button id="ac-btn" class="btn" onclick="addContact()" style="background:#0891b2;color:#fff;white-space:nowrap;">＋ 追加</button>
+      </div>
+      <div id="ac-result" style="display:none;margin-top:10px;"></div>
+    </div>`;
     if(!members.length){ h+=`<div style="color:var(--text-sub);font-size:13px;">対象となる法人配下ドライバーがいません。</div>`; }
     members.forEach(m=>{
       const co=m.company_name?`<span style="font-size:11px;color:var(--text-sub);margin-left:8px;">${escHtml(m.company_name)}</span>`:'';
@@ -442,6 +472,30 @@ async function openContactMgr(){
     area.innerHTML=h;
   }catch(e){ area.innerHTML=`<div class="card" style="color:var(--danger);">エラー: ${escHtml(e.message||String(e))}</div>`; }
 }
+// ＋自社担当を追加: ログイン作成+staff_master(担当者ON)。仮パスワードを表示。
+window.addContact=async function(){
+  const name=($('ac-name').value||'').trim();
+  const email=($('ac-email').value||'').trim();
+  const phone=($('ac-phone').value||'').trim();
+  const company=$('ac-company')?($('ac-company').value||'').trim():'';
+  if(!name||!email||!phone){alert('氏名・メール・電話を入力してください');return;}
+  const btn=$('ac-btn'); btn.disabled=true; btn.textContent='作成中...';
+  try{
+    const {data,error}=await sb.functions.invoke('staff-set-contact',{body:{action:'add_contact',full_name:name,email,phone,company_name:company}});
+    if(error||data?.error){ alert('追加失敗: '+((data&&data.error)||error?.message||'unknown')); return; }
+    const r=$('ac-result'); r.style.display='block';
+    r.innerHTML=`<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:12px;font-size:13px;line-height:1.8;">
+      ✅ <b>${escHtml(data.full_name)}</b> さんを自社担当として登録しました（会社: ${escHtml(data.company||'')}）。<br>
+      下記のログイン情報を本人にお伝えください。<b>仮パスワードは初回ログイン後の変更を推奨</b>します。
+      <div style="margin-top:8px;font-family:monospace;background:#fff;border:1px solid var(--border);border-radius:6px;padding:8px;">
+        メール: ${escHtml(data.email)}<br>仮パスワード: <b>${escHtml(data.temp_password)}</b><br>ログイン用電話: ${escHtml(data.phone)}
+      </div>
+      <div style="font-size:11px;color:var(--text-sub);margin-top:6px;">※一覧を最新化するには「🏢 自社の担当者」を開き直してください。</div>
+    </div>`;
+    $('ac-name').value='';$('ac-email').value='';$('ac-phone').value='';
+  }catch(e){ alert('追加失敗: '+(e.message||e)); }
+  finally{ btn.disabled=false; btn.textContent='＋ 追加'; }
+};
 window.toggleContact=async function(match_key,checked,el){
   if(el)el.disabled=true;
   try{
