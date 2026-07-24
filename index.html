@@ -916,6 +916,7 @@ async function loadAllPayees(){
     const [tools]=await Promise.all([fetchAllTools(ym),loadAccDeductions(ym)]);
     const authErr=[['新聞',tools.shift],['アスクル',tools.askul],['デリバリー',tools.delivery]].filter(([_,t])=>t&&t.code===403);
     if(authErr.length===3){ area.innerHTML=`<div class="card" style="color:var(--danger);">取引先一覧は管理者のみ利用できます。</div>`; return; }
+    window._lastTools=tools; // 再確定ボタン用(確定済みツール判定)
     renderPayeeList(ym,groupPayees(tools),tools);
   }catch(e){ area.innerHTML=`<div class="card" style="color:var(--danger);">取引先一覧の取得に失敗: ${escHtml(e.message||String(e))}</div>`; }
 }
@@ -940,6 +941,9 @@ function renderPayeeList(ym,groups,tools){
     <div class="label">📋 ${escHtml(ym)} 取引先一覧 合計支払額（3ツール横断）</div>
     <div class="value">${fmtYen(grand)}</div>
     <div style="font-size:11px;color:#92400e;margin-top:6px;">取引先 ${groups.length}件（法人/屋号 ${nCorp}・個人 ${nPer}） ／ 外注費 ${fmtYen(outTotal)}${taxTotal>0?` ＋消費税 ${fmtYen(taxTotal)}`:''}${errs.length?` ／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
+  </div>
+  <div style="margin-bottom:12px;text-align:right;">
+    <button class="btn" style="background:#f59e0b;color:#fff;" onclick="refinalizeMonth()" title="確定後にツール側(法人名・単価・稼働など)を修正した場合、確定済みツールを最新の元データで再確定し、ビューア/PDFへ反映します">🔄 変更を反映（再確定）</button>
   </div>`;
   if(!groups.length){ html+=`<div class="card" style="line-height:1.8;">該当する明細がありません。<br><span style="font-size:12px;color:var(--text-sub);">対象月(${escHtml(ym)})が各ツールで確定・公開済みかご確認ください。</span></div>`; $('result-area').innerHTML=html; return; }
   html+=`<div class="card" style="padding:0;overflow:hidden;">`;
@@ -966,6 +970,43 @@ function renderPayeeList(ym,groups,tools){
   });
   html+=`</div>`;
   $('result-area').innerHTML=html;
+}
+
+// ── 変更を反映(再確定): 確定後にツール側で修正した内容を、確定済みツールだけ再確定してビューアへ反映 ──
+// 未確定月の早期確定を防ぐため「その月に既に明細があるツール」だけを force 再確定する。
+async function refinalizeMonth(){
+  const ym=$('ym-input').value;
+  if(!ym){alert('対象月を選択してください');return;}
+  const t=window._lastTools||{};
+  const hasShift=(t.shift&&t.shift.statements||[]).length>0;
+  const hasAskul=(t.askul&&t.askul.statements||[]).length>0;
+  const hasDelivery=(t.delivery&&t.delivery.statements||[]).length>0;
+  const targets=[hasShift&&'新聞',hasAskul&&'アスクル',hasDelivery&&'デリバリー'].filter(Boolean);
+  if(!targets.length){alert('この月に確定済みのツールがありません。\n再確定は「既に確定済みのツール」だけが対象です（未確定月の早期確定を防ぐため）。');return;}
+  if(!confirm(`${ym} の確定を最新の元データで作り直します。\n対象（確定済み）: ${targets.join('・')}\n\nツール側で修正した法人名・単価・稼働などをビューア/PDFへ反映します。よろしいですか？`))return;
+  const area=$('result-area');
+  area.insertAdjacentHTML('afterbegin',`<div id="refin-msg" class="card center" style="background:#fffbeb;border-color:#fbbf24;color:#92400e;">🔄 再確定中… (${escHtml(targets.join('・'))})</div>`);
+  const jwt=await freshToken();
+  const call=async(url,anon,b)=>{ try{ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+anon},body:JSON.stringify(b)}); const j=await r.json().catch(()=>({})); return {ok:r.ok&&!j.error,status:r.status,j}; }catch(e){return {ok:false,error:e.message};} };
+  const out=[];
+  if(hasShift){
+    const s=await call(SUPABASE_URL+'/functions/v1/finalize-shift',SUPABASE_ANON,{year_month:ym,dry_run:false,force:true,auth_token:jwt});
+    out.push(`新聞: ${s.ok?('確定 '+((s.j&&s.j.saved)??0)+'件'):('失敗 '+((s.j&&s.j.error)||s.error||('HTTP '+s.status)))}`);
+  }
+  if(hasAskul){
+    const base='https://erfcsnzdooswgpvgrapb.supabase.co/functions/v1/finalize-askul';
+    const a=await call(base,ASKUL_ANON,{mode:'finalize',dry_run:false,force:true,year_month:ym,auth_token:jwt});
+    if(a.ok)await call(base,ASKUL_ANON,{mode:'reflect',year_month:ym,auth_token:jwt});
+    out.push(`アスクル: ${a.ok?('確定 '+((a.j&&a.j.saved)??0)+'件'):('失敗 '+((a.j&&a.j.error)||a.error||('HTTP '+a.status)))}`);
+  }
+  if(hasDelivery){
+    const base='https://ymdaakiwxkjotlmzveom.supabase.co/functions/v1/finalize-yamato';
+    const d=await call(base,DELIVERY_ANON,{mode:'finalize',dry_run:false,force:true,year_month:ym,auth_token:jwt});
+    if(d.ok)await call(base,DELIVERY_ANON,{mode:'reflect',year_month:ym,auth_token:jwt});
+    out.push(`デリバリー: ${d.ok?('確定 '+((d.j&&d.j.saved)??0)+'件'):('失敗 '+((d.j&&d.j.error)||d.error||('HTTP '+d.status)))}`);
+  }
+  alert('再確定 完了\n\n'+out.join('\n'));
+  loadAllPayees(); // 一覧を最新で取り直す
 }
 
 function _payeeDetailFor(it){
