@@ -815,7 +815,7 @@ function renderCompanyAgg(company, ym, tools){
   // 無ければ支払先(氏名)ごとに完全一致で拾う。
   let {items:dedItems}=accCompanyDeduction(company,ym);
   if(!dedItems.length){
-    payees.forEach(p=>{ const d=accDeductionFor(p.name,ym); if(d.lease>0)dedItems.push({name:`${p.name}（車両リース料）`,amount:d.lease}); if(d.advance>0)dedItems.push({name:`${p.name}（立替金）`,amount:d.advance}); if(d.calc_fee>0)dedItems.push({name:`${p.name}（計算手数料）`,amount:d.calc_fee}); if(d.loan>0)dedItems.push({name:`${p.name}（貸付金返済）`,amount:d.loan}); });
+    payees.forEach(p=>{ const d=accDeductionFor(p.name,ym); if(d.lease>0)dedItems.push({name:`${p.name}（車両リース料）`,amount:d.lease}); if(d.advance>0)dedItems.push({name:`${p.name}（立替金）`,amount:d.advance}); if(d.calc_fee>0)dedItems.push({name:`${p.name}（計算手数料）`,amount:d.calc_fee}); if(d.loan>0)dedItems.push({name:`${p.name}（貸付金返済）`,amount:d.loan}); if(d.receivable>0)dedItems.push({name:`${p.name}（未収入金）`,amount:d.receivable}); (d.customItems||[]).forEach(c=>{if(c.amount>0)dedItems.push({name:`${p.name}（${c.name||'その他控除'}）`,amount:c.amount});}); });
   }
   const dedTotal=dedItems.reduce((a,d)=>a+d.amount,0);
   // 適格判定(会計マスタ invPartners)→適格なら消費税(10%)を上乗せ(支払通知書PDFと一致)。外注費(税抜)=ツール合計。
@@ -1055,7 +1055,12 @@ function _dedIdxToYm(n){return `${Math.floor(n/12)}-${String((n%12)+1).padStart(
 function _loanDue(row,month,loanOv){
   const total=Math.round(Number(row.loan_total)||0),monthly=Math.round(Number(row.loan_monthly)||0);
   const start=_dedToIdx(row.loan_start||''),target=_dedToIdx(month);
-  if(start===null||target===null||target<start)return 0;
+  if(target===null)return 0;
+  if(start===null){ // 返済開始月なしでも、当月の上書き(手入力した当月返済)があればそれを使う(会計 loanDueWithOverrides と同一)
+    const ov=loanOv.get(month);
+    return ov!=null?Math.max(0,Math.round(ov)):0;
+  }
+  if(target<start)return 0;
   if(monthly<=0&&loanOv.size===0)return 0;
   let cum=0;
   for(let t=start;t<=target;t++){
@@ -1081,13 +1086,20 @@ function _accDedForRow(row,month){
   const advance=ao?Math.round(Number(ao.advance)||0):Math.round(Number(row.advance_monthly)||0);
   const co=(_accDed.ov||[]).find(o=>nmKey(o.name||'')===key&&o.month===month&&o.calc_fee!=null&&String(o.calc_fee)!=='');
   const calc_fee=co?Math.round(Number(co.calc_fee)||0):Math.round(Number(row.calc_fee_monthly)||0);
-  return {lease,loan,advance,calc_fee,total:lease+loan+advance+calc_fee};
+  const receivable=Math.round(Number(row.receivable_monthly)||0); // 未収入金
+  // その他控除(項目追加のカスタム項目・名称＋月額)
+  const customItems=(Array.isArray(row.custom_items)?row.custom_items:[])
+    .filter(c=>String(c&&c.name||'').trim()||Number(c&&c.amount))
+    .map(c=>({name:String(c&&c.name||'').trim(),amount:Math.round(Number(c&&c.amount)||0)}));
+  const otherDed=customItems.reduce((s,c)=>s+c.amount,0);
+  return {lease,loan,advance,calc_fee,receivable,customItems,otherDed,total:lease+loan+advance+calc_fee+receivable+otherDed};
 }
 // 取引先名(個人=氏名)を完全一致で照合 → {lease,loan,advance,calc_fee,total}
 function accDeductionFor(name,month){
-  const key=nmKey(name||'');if(!key)return {lease:0,loan:0,advance:0,calc_fee:0,total:0};
+  const _empty={lease:0,loan:0,advance:0,calc_fee:0,receivable:0,customItems:[],otherDed:0,total:0};
+  const key=nmKey(name||'');if(!key)return _empty;
   const row=(_accDed.rows||[]).find(r=>nmKey(r.name||'')===key);
-  return row?_accDedForRow(row,month):{lease:0,loan:0,advance:0,calc_fee:0,total:0};
+  return row?_accDedForRow(row,month):_empty;
 }
 // 法人: 会社名を部分一致で照合し、該当する全取引先行を合算 (会社名行・会社配下の個別行の両方を拾う)
 function accCompanyDeduction(company,month){
@@ -1100,6 +1112,8 @@ function accCompanyDeduction(company,month){
     if(d.advance>0)items.push({name:`${row.name}（立替金）`,amount:d.advance});
     if(d.calc_fee>0)items.push({name:`${row.name}（計算手数料）`,amount:d.calc_fee});
     if(d.loan>0)items.push({name:`${row.name}（貸付金返済）`,amount:d.loan});
+    if(d.receivable>0)items.push({name:`${row.name}（未収入金）`,amount:d.receivable});
+    (d.customItems||[]).forEach(c=>{if(c.amount>0)items.push({name:`${row.name}（${c.name||'その他控除'}）`,amount:c.amount});});
   });
   return {items,total:items.reduce((a,x)=>a+x.amount,0)};
 }
@@ -1110,6 +1124,8 @@ function accDedItems(name,month){
   if(d.advance>0)items.push({label:'立替金',amount:d.advance,active:true});
   if(d.calc_fee>0)items.push({label:'計算手数料',amount:d.calc_fee,active:true});
   if(d.loan>0)items.push({label:'貸付金返済',amount:d.loan,active:true});
+  if(d.receivable>0)items.push({label:'未収入金',amount:d.receivable,active:true});
+  (d.customItems||[]).forEach(c=>{if(c.amount>0)items.push({label:c.name||'その他控除',amount:c.amount,active:true});});
   return items;
 }
 // 取引先の備考(車両リース・貸付金マスタ acc_driver_deductions.note)。個人=完全一致 / 法人=部分一致の全行を集約。
@@ -1872,6 +1888,7 @@ async function downloadAllPdf(){
 // ── 法人まとめPDF (会社合計カバー + 全支払先の別紙明細) ──
 function buildCompanyCoverHtml(company, ym, payees, dedItems, dedTotal, toolTotal){
   const [y,m]=ym.split('-').map(Number);
+  const cNote=accNoteFor(company); // 法人の備考(車両リース・貸付金マスタ note を会社名で集約)
   const fmtNum=n=>Math.round(Number(n)||0).toLocaleString();
   const yen=n=>'￥'+fmtNum(n);
   const net=toolTotal-dedTotal;
@@ -1925,6 +1942,7 @@ function buildCompanyCoverHtml(company, ym, payees, dedItems, dedTotal, toolTota
       ${rowKv('年月',escHtml(eraLabel(y,m)))}
       ${rowKv('営業所',escHtml(shipper))}
       ${rowKv('詳細','別紙のとおり')}
+      ${cNote.trim()?rowKv('備考',escHtml(cNote)):''}
     </table>
     <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">金額内訳</div>
     <div style="display:flex;justify-content:flex-end;margin-bottom:18px;">
