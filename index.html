@@ -1112,6 +1112,15 @@ function accDedItems(name,month){
   if(d.loan>0)items.push({label:'貸付金返済',amount:d.loan,active:true});
   return items;
 }
+// 取引先の備考(車両リース・貸付金マスタ acc_driver_deductions.note)。個人=完全一致 / 法人=部分一致の全行を集約。
+function accNoteFor(name){
+  const key=nmKey(name||'');if(!key)return '';
+  const exact=(_accDed.rows||[]).find(r=>nmKey(r.name||'')===key);
+  if(exact)return String(exact.note||'').trim();
+  const notes=[];
+  (_accDed.rows||[]).forEach(r=>{if(nmKey(r.name||'').includes(key)&&r.note){const t=String(r.note).trim();if(t&&!notes.includes(t))notes.push(t);}});
+  return notes.join(' / ');
+}
 
 async function loadFor(phone, name, tp, fromCompany){
   window._fromCompany=!!fromCompany;
@@ -1151,11 +1160,12 @@ async function loadFor(phone, name, tp, fromCompany){
     ||(delivery&&delivery.statements&&delivery.statements[0]&&delivery.statements[0].driver_name)
     ||name||'';
   const deductions=accDedItems(nm,ym);
-  renderResults({shift,askul,delivery,deductions,ym,phone});
+  const dedNote=accNoteFor(nm);
+  renderResults({shift,askul,delivery,deductions,dedNote,ym,phone});
 }
 
-function renderResults({shift,askul,delivery,deductions,ym,phone}){
-  currentData={shift,askul,delivery,deductions:deductions||[],ym,phone};
+function renderResults({shift,askul,delivery,deductions,dedNote,ym,phone}){
+  currentData={shift,askul,delivery,deductions:deductions||[],dedNote:dedNote||'',ym,phone};
   const area=$('result-area');
   const toolTotal=calcTotal({shift,askul,delivery});
   const foundCount=[shift,askul,delivery].filter(r=>r&&r.found).length;
@@ -1208,6 +1218,14 @@ function renderResults({shift,askul,delivery,deductions,ym,phone}){
       ${deds.map(d=>`<div class="amount-row"><span class="label">${escHtml(d.label)}</span><span class="value" style="color:#dc2626;">−${fmtYen(d.amount)}</span></div>`).join('')}
       <div class="divider"></div>
       <div class="amount-row"><span class="label" style="font-weight:600;">差引合計</span><span class="value" style="color:#dc2626;font-weight:700;">−${fmtYen(deductionTotal)}</span></div>
+    </div>`;
+  }
+
+  // 備考 (車両リース・貸付金マスタの備考をサマリーに転記)
+  if((dedNote||'').trim()){
+    html+=`<div class="card" style="padding:10px 14px;">
+      <div style="font-size:12px;color:var(--text-sub);margin-bottom:4px;">📝 備考</div>
+      <div style="font-size:13px;white-space:pre-wrap;">${escHtml(dedNote)}</div>
     </div>`;
   }
 
@@ -1596,6 +1614,7 @@ function buildSummaryHtml(){
       ${rowKv('年月',escHtml(eraLabel(y,m)))}
       ${rowKv('営業所',escHtml(office))}
       ${rowKv('詳細',detail)}
+      ${(currentData.dedNote||'').trim()?rowKv('備考',escHtml(currentData.dedNote)):''}
     </table>
 
     <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">金額内訳</div>
