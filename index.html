@@ -1972,6 +1972,8 @@ function buildCompanyCoverHtml(company, ym, payees, dedItems, dedTotal, toolTota
   const registered=invHit?(invHit.registered!==false):false;
   const tno=invHit?(invHit.invoice_number||''):'';
   const hasTax=!!(registered&&tno);
+  // 宛名: 会計マスタに正式名称があればそれを優先(例「株式会社ラストワンマイル・パートナーズ」)。無ければグループキーの会社名。
+  const payeeName=(invHit&&invHit.name)?invHit.name:company;
   // 会計と同一式: 外注費(税抜J)=ツール合計 / 計算手数料(L)=控除マスタ。
   //   消費税=(J−L)×0.1(計算手数料を引いた後に課税) / お支払額=(J−L)×1.1−その他控除。
   const gaityu=toolTotal;
@@ -1996,7 +1998,7 @@ function buildCompanyCoverHtml(company, ym, payees, dedItems, dedTotal, toolTota
       <div style="text-align:right;font-size:12px;line-height:1.9;"><div>発行日：${issueDate}</div><div>管理番号：${escHtml(mgmtNo)}</div></div>
     </div>
     <div style="margin-bottom:6px;">
-      <div style="font-size:20px;font-weight:700;border-bottom:1.5px solid #111;padding-bottom:4px;display:inline-block;min-width:260px;">${escHtml(company)}<span style="font-size:14px;font-weight:400;margin-left:24px;">御中</span></div>
+      <div style="font-size:20px;font-weight:700;border-bottom:1.5px solid #111;padding-bottom:4px;display:inline-block;min-width:260px;">${escHtml(payeeName)}<span style="font-size:14px;font-weight:400;margin-left:24px;">御中</span></div>
       ${invLine}
     </div>
     <div style="font-size:12px;margin:12px 0 16px;">下記のとおりお支払い申し上げますので、ご確認くださいますようお願い申し上げます。</div>
