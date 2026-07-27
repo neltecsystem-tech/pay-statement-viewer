@@ -1554,6 +1554,32 @@ function ownerName(){
   return profile?.display_name||'';
 }
 
+// 支払通知書の「宛名」用: 正式表示を優先する。
+//  ① 会計マスタ(acc_invoice_partners)の正式名称 … 会社名で照合 → 無ければ本人氏名/屋号で照合
+//  ② 現場ツール明細の会社名/屋号
+//  ③ 個人氏名(ownerName)
+// ※「法人名のみ」方針: 法人名/屋号があればそれ単体を表示(個人名の併記なし)。個人はそのまま氏名。
+function formalPayeeName(){
+  if(!currentData)return ownerName();
+  const ym=currentData.ym||'';
+  const okMonth=p=>(!p.effective_from||String(p.effective_from).slice(0,7)<=(ym||'9999-99'));
+  const personal=ownerName();
+  const stmtCo=(currentData.shift?.statements?.[0]?.company_name)
+             ||(currentData.askul?.statements?.[0]?.company_name)
+             ||(currentData.delivery?.statements?.[0]?.company_name)
+             ||(targetProfile?.company)||'';
+  // ① 会計マスタ正式名称: 会社名で照合(表記ゆれ吸収)
+  const coKey=normCo(stmtCo);
+  if(coKey){const hit=invPartners.find(p=>normCo(p.name)===coKey&&okMonth(p));if(hit&&hit.name)return hit.name;}
+  // ② 会計マスタ正式名称: 本人氏名/屋号で照合(個人事業主が取引先登録されている場合)
+  const nmk=normCo(personal);
+  if(nmk){const hit=invPartners.find(p=>normCo(p.name)===nmk&&okMonth(p));if(hit&&hit.name)return hit.name;}
+  // ③ 現場ツールの会社名/屋号
+  if(stmtCo)return stmtCo;
+  // ④ 個人氏名
+  return personal;
+}
+
 function safeFile(s){return String(s||'').replace(/[\\/:*?"<>|]/g,'_');}
 
 function eraLabel(y,m){
@@ -1599,6 +1625,7 @@ function buildSummaryHtml(){
   const fmtNum=n=>Math.round(Number(n)||0).toLocaleString();
   const yen=n=>'￥'+fmtNum(n);
   const owner=ownerName();
+  const payee=formalPayeeName();   // 宛名: 正式表示(法人名/屋号)優先。ドライバー欄は実働者(owner)のまま。
   // 金額: ツール合計 − 差引項目(貸付金返済等)= 合計金額(=お支払額)
   const toolTotal=calcTotal(currentData);
   const deds=(currentData.deductions||[]).filter(d=>d.active);
@@ -1652,7 +1679,7 @@ function buildSummaryHtml(){
     </div>
 
     <div style="margin-bottom:6px;">
-      <div style="font-size:20px;font-weight:700;border-bottom:1.5px solid #111;padding-bottom:4px;display:inline-block;min-width:260px;">${escHtml(owner)}<span style="font-size:14px;font-weight:400;margin-left:24px;">様</span></div>
+      <div style="font-size:20px;font-weight:700;border-bottom:1.5px solid #111;padding-bottom:4px;display:inline-block;min-width:260px;">${escHtml(payee)}<span style="font-size:14px;font-weight:400;margin-left:24px;">様</span></div>
       ${inv?`<div style="font-size:12px;color:#111;margin-top:6px;display:flex;align-items:center;gap:8px;">
         <span style="display:inline-block;padding:1px 7px;border:1px solid #111;border-radius:3px;font-size:10px;font-weight:700;white-space:nowrap;">適格請求書発行事業者</span>
         <span>登録番号　<span style="font-weight:700;letter-spacing:.5px;">${escHtml(inv.no)}</span></span>
