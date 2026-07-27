@@ -793,6 +793,7 @@ async function loadCompany(company){
   area.innerHTML=`<div class="card center"><div class="spinner"></div> 「${escHtml(company)}」の法人集計中（新聞・アスクル・デリバリー横断）...</div>`;
   $('btn-summary-pdf').disabled=true; $('btn-all-pdf').disabled=true; currentData=null;
   const [tools]=await Promise.all([fetchTools('', '', company, ym), loadAccDeductions(ym)]);
+  try{window._companyPending=await pendingToolsForCompany(company,ym);}catch(_){window._companyPending=[];}
   renderCompanyAgg(company, ym, tools);
 }
 
@@ -826,7 +827,8 @@ function renderCompanyAgg(company, ym, tools){
   const zei=_hasTax?Math.round(total*0.1):0;
   const net=total+zei-dedTotal;
 
-  let html=`<div class="grand-total-card">
+  const _pendBanner=(window._companyPending&&window._companyPending.length)?pendingBannerHtml(window._companyPending):'';
+  let html=_pendBanner+`<div class="grand-total-card">
     <div class="label">🏢 ${escHtml(company)} / ${escHtml(ym)} ${dedTotal>0?'差引後 ':''}会社合計支払額（3ツール横断）</div>
     <div class="value">${fmtYen(net)}</div>
     <div style="font-size:11px;color:#92400e;margin-top:6px;">支払先 ${payees.length}件 ／ 外注費 ${fmtYen(total)}${zei>0?` ＋消費税 ${fmtYen(zei)}`:''}${dedTotal>0?` − 控除 ${fmtYen(dedTotal)}`:''}${_hasTax?' <span style="color:#15803d;">(適格)</span>':''} ${errs.length?`／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
@@ -1218,6 +1220,8 @@ async function loadFor(phone, name, tp, fromCompany){
     ||name||'';
   const deductions=accDedItems(nm,ym);
   const dedNote=accNoteFor(nm);
+  const _found={shift:!!(shift&&shift.found),askul:!!(askul&&askul.found),delivery:!!(delivery&&delivery.found)};
+  try{window._pdfPending=await pendingToolsForPerson(phone,ym,_found);}catch(_){window._pdfPending=[];}
   renderResults({shift,askul,delivery,deductions,dedNote,ym,phone});
 }
 
@@ -1233,6 +1237,7 @@ function renderResults({shift,askul,delivery,deductions,dedNote,ym,phone}){
   $('btn-all-pdf').disabled=foundCount===0;
 
   let html='';
+  if(window._pdfPending&&window._pdfPending.length)html+=pendingBannerHtml(window._pdfPending);
   if(window._fromCompany&&window._lastCompany){
     html+=`<div style="margin-bottom:12px;"><button class="btn btn-secondary" onclick="loadCompany(window._lastCompany)">← 「${escHtml(window._lastCompany)}」法人集計に戻る</button></div>`;
   }
@@ -1542,6 +1547,51 @@ function shouldHide(stmt,source){
 }
 
 function hideMsg(){return '<div class="muted" style="padding:6px 10px;background:#f1f5f9;border-radius:6px;font-size:11px;">※ 法人所属 / 社員区分のため金額は非表示 (会社オーナーまたは管理者にお問い合わせください)</div>';}
+
+// ── 先走りPDF発行ガード(管理者向け): 当月まだ確定していないツールがあれば警告 ──
+let _finalizedCache={}, _smAllCache=null;
+const TOOL_LABEL={shift:'新聞シフト',askul:'アスクル',delivery:'デリバリー'};
+function amAdminNow(){return profile?.role==='admin'||profile?.role==='super_admin';}
+// 当月に各ツールがfinalize(確定)済みか = 当月の確定明細が1件でもあるか。取得失敗時はゲートしない(true)。
+async function finalizedToolsForMonth(ym){
+  if(_finalizedCache[ym])return _finalizedCache[ym];
+  const [y,m]=ym.split('-').map(Number);
+  const res={shift:true,askul:true,delivery:true};
+  try{const {count}=await sb.from('closed_pay_statements').select('id',{count:'exact',head:true}).eq('year',y).eq('month',m);res.shift=(count||0)>0;}catch(_){}
+  const jwt=await freshToken();
+  const cnt=async(url,anon)=>{try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+anon},body:JSON.stringify({list_all:true,year_month:ym,auth_token:jwt})});if(!r.ok)return null;const j=await r.json();return Array.isArray(j.statements)?j.statements.length:null;}catch(_){return null;}};
+  const ak=await cnt(ASKUL_URL,ASKUL_ANON); if(ak!==null)res.askul=ak>0;
+  const dl=await cnt(DELIVERY_URL,DELIVERY_ANON); if(dl!==null)res.delivery=dl>0;
+  _finalizedCache[ym]=res; return res;
+}
+async function staffMasterAll(){ if(_smAllCache)return _smAllCache; try{const {data}=await sb.from('staff_master').select('phone,company_name,tools');_smAllCache=data||[];}catch(_){_smAllCache=[];} return _smAllCache; }
+async function registeredToolsForPhone(phone){ const all=await staffMasterAll(); const p=normalizePhone(phone||''); const hit=all.find(r=>normalizePhone(r.phone||'')===p); return (hit&&Array.isArray(hit.tools))?hit.tools:[]; }
+async function registeredToolsForCompany(company){ const all=await staffMasterAll(); const c=normCo(company); const s=new Set(); all.forEach(r=>{ if(c&&normCo(r.company_name)===c&&Array.isArray(r.tools))r.tools.forEach(t=>s.add(t)); }); return [...s]; }
+// 個人: 登録ツール(staff_master.tools)のうち、当月未確定 かつ 本人明細も未取得 のもの
+async function pendingToolsForPerson(phone, ym, found){
+  if(!amAdminNow())return [];
+  const reg=await registeredToolsForPhone(phone); if(!reg.length)return [];
+  const fin=await finalizedToolsForMonth(ym);
+  return reg.filter(t=>!found[t] && fin[t]===false);
+}
+// 法人: 会社の登録ツールのうち、当月未確定のもの(=まだ来ていない支払先がある)
+async function pendingToolsForCompany(company, ym){
+  if(!amAdminNow())return [];
+  const reg=await registeredToolsForCompany(company); if(!reg.length)return [];
+  const fin=await finalizedToolsForMonth(ym);
+  return reg.filter(t=>fin[t]===false);
+}
+function pendingBannerHtml(pending){
+  if(!pending||!pending.length)return '';
+  return `<div class="card" style="border-color:#f59e0b;background:#fffbeb;margin-bottom:12px;">
+    <div style="font-weight:700;color:#92400e;font-size:13px;">⚠️ 未確定のツールがあります（先走り発行注意）</div>
+    <div style="font-size:12px;color:#92400e;margin-top:4px;line-height:1.7;">${pending.map(t=>escHtml(TOOL_LABEL[t]||t)).join('・')} が当月まだ確定していません（新聞=5日確定/10日反映・デリバリー=5日）。この状態でPDFを発行すると<b>一部のツールが欠けた不完全な支払通知書</b>になります。全ツール確定後の発行を推奨します。</div>
+  </div>`;
+}
+function confirmPending(pending){
+  if(!pending||!pending.length)return true;
+  return confirm('⚠️ '+pending.map(t=>TOOL_LABEL[t]||t).join('・')+' が当月まだ確定していません。\nこのまま発行すると一部ツールが欠けた不完全な支払通知書になります。\n\nそれでも発行しますか？');
+}
 
 function ownerName(){
   if(!currentData)return '';
@@ -1889,6 +1939,7 @@ function buildDeliveryDetailHtml(){
 
 async function downloadSummaryPdf(){
   if(!currentData)return;
+  if(!confirmPending(window._pdfPending))return;
   const btn=$('btn-summary-pdf');
   btn.disabled=true;const old=btn.textContent;btn.textContent='⏳ 生成中...';
   try{
@@ -1915,6 +1966,7 @@ async function downloadToolPdf(source){
 
 async function downloadAllPdf(){
   if(!currentData)return;
+  if(!confirmPending(window._pdfPending))return;
   const btn=$('btn-all-pdf');
   btn.disabled=true;const old=btn.textContent;btn.textContent='⏳ 生成中...';
   try{
@@ -2053,6 +2105,7 @@ function buildPayeeDetailHtml(p){
 async function downloadCompanyPdf(){
   const company=window._lastCompany, ym=window._lastCompanyYm, payees=_companyPayees||[];
   if(!company||!payees.length){alert('法人集計を表示してから実行してください');return;}
+  if(!confirmPending(window._companyPending))return;
   const btn=document.querySelector('button[onclick="downloadCompanyPdf()"]');
   const old=btn?btn.textContent:''; if(btn){btn.disabled=true;btn.textContent='⏳ 生成中...';}
   try{
