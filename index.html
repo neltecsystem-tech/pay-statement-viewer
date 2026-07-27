@@ -1574,12 +1574,13 @@ async function pendingToolsForPerson(phone, ym, found){
   const fin=await finalizedToolsForMonth(ym);
   return reg.filter(t=>!found[t] && fin[t]===false);
 }
-// 法人: 会社の登録ツールのうち、当月未確定のもの(=まだ来ていない支払先がある)
+// 法人: 対象月にまだ確定していないツールを検出。
+//  ※ staff_master.tools は中央マスタ未登録の支払先を取りこぼす(例: 新聞のラストワンマイル1/2)ため、
+//    会社ではグローバルな月次確定状況で判定する。未確定ツールがある=会社合計に未反映の支払先があり得る。
 async function pendingToolsForCompany(company, ym){
   if(!amAdminNow())return [];
-  const reg=await registeredToolsForCompany(company); if(!reg.length)return [];
   const fin=await finalizedToolsForMonth(ym);
-  return reg.filter(t=>fin[t]===false);
+  return ['shift','askul','delivery'].filter(t=>fin[t]===false);
 }
 function pendingBannerHtml(pending){
   if(!pending||!pending.length)return '';
