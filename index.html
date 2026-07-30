@@ -1335,6 +1335,24 @@ function renderResults({shift,askul,delivery,deductions,dedNote,ym,phone}){
   if($('acceptance-bar'))loadAcceptanceBar(ym);
 }
 
+// 日本の祝日(2025-2027, JST) — pay-auto-accept と同一。異議期限の営業日計算で除外。振替休日・国民の休日含む。
+const JP_HOLIDAYS=new Set([
+  '2025-01-01','2025-01-13','2025-02-11','2025-02-23','2025-02-24','2025-03-20','2025-04-29','2025-05-03',
+  '2025-05-04','2025-05-05','2025-05-06','2025-07-21','2025-08-11','2025-09-15','2025-09-23','2025-10-13',
+  '2025-11-03','2025-11-23','2025-11-24',
+  '2026-01-01','2026-01-12','2026-02-11','2026-02-23','2026-03-20','2026-04-29','2026-05-03','2026-05-04',
+  '2026-05-05','2026-05-06','2026-07-20','2026-08-11','2026-09-21','2026-09-22','2026-09-23','2026-10-12',
+  '2026-11-03','2026-11-23',
+  '2027-01-01','2027-01-11','2027-02-11','2027-02-23','2027-03-21','2027-03-22','2027-04-29','2027-05-03',
+  '2027-05-04','2027-05-05','2027-07-19','2027-08-11','2027-09-20','2027-09-23','2027-10-11','2027-11-03',
+  '2027-11-23',
+]);
+const ymdLocal=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const isBizDay=d=>{const w=d.getDay();return w!==0&&w!==6&&!JP_HOLIDAYS.has(ymdLocal(d));};
+// 発行日の翌日から数えて n 営業日目の日付(土日祝除外)を返す。異議期限=3営業日目(=この日まで申立可)。
+// pay-auto-accept は bizDaysAfter>=4 で自動受領するため「4営業日目に確定」= 期限は3営業日目、と一致する。
+const bizDeadline=(issued,n)=>{const cur=new Date(issued.getFullYear(),issued.getMonth(),issued.getDate());let c=0;while(c<n){cur.setDate(cur.getDate()+1);if(isBizDay(cur))c++;}return cur;};
+
 // ── 受領ワークフロー: 発行状態の表示 + 異議申し立て ──
 async function loadAcceptanceBar(ym){
   const el=$('acceptance-bar'); if(!el||!profile)return;
@@ -1343,7 +1361,7 @@ async function loadAcceptanceBar(ym){
   if(!rec){ el.innerHTML=''; return; } // 未発行(通知メール前)は何も出さない
   const st=rec.status;
   const issued=rec.issued_at?new Date(rec.issued_at):null;
-  const deadline=issued?new Date(issued.getTime()+3*24*3600*1000):null; // 発行+3日=異議期限
+  const deadline=issued?bizDeadline(issued,3):null; // 発行から3営業日後(土日祝除外)=異議期限。pay-auto-acceptと一致
   const fmtD=d=>d?`${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`:'';
   if(st==='accepted'){
     el.innerHTML=`<div class="card" style="margin-bottom:12px;background:#f0fdf4;border-color:#86efac;"><div style="font-size:13px;color:#15803d;font-weight:700;">✅ 受領確定済み</div><div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${escHtml(ym)}分の支払通知書は受領確定しています。</div></div>`;
@@ -1352,7 +1370,7 @@ async function loadAcceptanceBar(ym){
   }else{ // pending
     el.innerHTML=`<div class="card" style="margin-bottom:12px;background:#eff6ff;border-color:#93c5fd;">
       <div style="font-size:13px;color:#1d4ed8;font-weight:700;">📄 支払通知書 発行済み（ご確認ください）</div>
-      <div style="font-size:11px;color:var(--text-sub);margin:4px 0 8px;">発行日 ${fmtD(issued)}。内容にご異議がある場合は <b>${fmtD(deadline)} まで（発行から3日以内）</b>に下記より申し立ててください。3日以内にご連絡がなければ発行から4日目に受領確定します。</div>
+      <div style="font-size:11px;color:var(--text-sub);margin:4px 0 8px;">発行日 ${fmtD(issued)}。内容にご異議がある場合は <b>${fmtD(deadline)} まで（発行から3営業日以内・土日祝を除く）</b>に下記より申し立ててください。ご連絡がなければ4営業日目に受領確定します。</div>
       <button class="btn btn-secondary" style="background:#f59e0b;color:#fff;font-size:12px;" onclick="openObjection('${escHtml(ym)}')">⚠ 異議申し立て</button>
     </div>`;
   }
