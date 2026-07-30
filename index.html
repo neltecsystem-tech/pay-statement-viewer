@@ -412,6 +412,11 @@ async function postLogin(){
   }
   // 法人配下ドライバーはログイン不可(中央人材マスタ staff_master 参照)。個人/オーナー/担当者/社員/管理者は可。
   const isAdmin=profile.role==='admin'||profile.role==='super_admin';
+  // 明細ビューア ログイン許可: recipient_access.viewer_login=false の人はログイン不可(管理者は除外)。会計の「ログイン許可」でON/OFF。
+  if(!isAdmin){
+    const {data:_ra}=await sb.from('recipient_access').select('viewer_login').eq('profile_id',session.user.id).maybeSingle();
+    if(_ra && _ra.viewer_login===false){ showDisabledScreen(); return; }
+  }
   if(profile.phone && !isAdmin){
     const blocked=await checkCentralGate(profile.phone);
     if(blocked){ showCorpBlockScreen(); return; }
@@ -601,6 +606,16 @@ function showCorpBlockScreen(){
   el.innerHTML=`<h2 style="color:var(--danger);">ご利用いただけません</h2>
     <p style="font-size:14px;line-height:1.9;color:var(--text-sub);">${info.company_name?('「'+escHtml(info.company_name)+'」の'):''}法人配下ドライバーのアカウントです。<br>支払明細は<b>御社の担当者またはオーナー</b>がまとめてご確認いただく運用です。<br>閲覧が必要な場合は、御社のオーナーへビューアの「担当者」登録をご依頼ください。</p>
     <button class="btn btn-block" onclick="doLogout();var e=document.getElementById('screen-corp-block');if(e)e.style.display='none';">ログアウト</button>`;
+}
+function showDisabledScreen(){
+  $('screen-login').style.display='none';
+  $('screen-main').style.display='none';
+  let el=document.getElementById('screen-disabled');
+  if(!el){ el=document.createElement('div'); el.id='screen-disabled'; el.className='login-screen'; document.body.appendChild(el); }
+  el.style.display='block';
+  el.innerHTML=`<h2 style="color:var(--danger);">ご利用を停止しています</h2>
+    <p style="font-size:14px;line-height:1.9;color:var(--text-sub);">この明細ビューアのご利用は現在停止されています。<br>ご不明な点は担当者へお問い合わせください。</p>
+    <button class="btn btn-block" onclick="doLogout();var e=document.getElementById('screen-disabled');if(e)e.style.display='none';">ログアウト</button>`;
 }
 
 async function promptPhone(){
