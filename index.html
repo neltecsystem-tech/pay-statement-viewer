@@ -401,6 +401,11 @@ async function postLogin(){
   $('screen-main').style.display='block';
   $('hdr-user').textContent=`${profile.display_name||session.user.email}${(profile.role==='admin'||profile.role==='super_admin')?' (管理者)':''}`;
   $('ym-input').value=thisMonth();
+  // 表示対象月の制限: 2026年7月分より前は非管理者に表示しない(通知運用開始が7月から)。管理者は過去も閲覧可。
+  if(!(profile.role==='admin'||profile.role==='super_admin')){
+    $('ym-input').min='2026-07';
+    if($('ym-input').value<'2026-07')$('ym-input').value='2026-07';
+  }
   if(profile.role==='admin'||profile.role==='super_admin'){
     $('admin-toggle-wrap').style.display='inline-flex';
     // メンバー管理は中央マスタ(人材マスタ)に一本化したため非表示
