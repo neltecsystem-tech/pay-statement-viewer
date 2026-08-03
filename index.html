@@ -686,6 +686,10 @@ function toggleAdminMode(){
 }
 
 function loadAll(){
+  // オーナー/担当は「読み込み」で自社(法人集計=配下全員)を表示。本人明細を持たない受け手(現場で働かない担当)でも配下全員が見える。
+  const c=window._myCentral;
+  const isOwnerOrContact=!!(c&&(c.is_company_owner||c.category==='法人オーナー'||c.is_company_contact));
+  if(isOwnerOrContact&&window._myCompany){ loadCompany(window._myCompany); return; }
   const phone=profile.phone;
   if(!phone){alert('電話番号が未登録です');return;}
   loadFor(phone);
