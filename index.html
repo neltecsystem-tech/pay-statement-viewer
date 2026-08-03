@@ -845,13 +845,27 @@ function renderCompanyAgg(company, ym, tools){
   const zei=_hasTax?Math.round(total*0.1):0;
   const net=total+zei-dedTotal;
 
-  const _pendBanner=(window._companyPending&&window._companyPending.length)?pendingBannerHtml(window._companyPending):'';
-  let html=_pendBanner+`<div class="grand-total-card">
-    <div class="label">🏢 ${escHtml(company)} / ${escHtml(ym)} ${dedTotal>0?'差引後 ':''}会社合計支払額（3ツール横断）</div>
-    <div class="value">${fmtYen(net)}</div>
-    <div style="font-size:11px;color:#92400e;margin-top:6px;">支払先 ${payees.length}件 ／ 外注費 ${fmtYen(total)}${zei>0?` ＋消費税 ${fmtYen(zei)}`:''}${dedTotal>0?` − 控除 ${fmtYen(dedTotal)}`:''}${_hasTax?' <span style="color:#15803d;">(適格)</span>':''} ${errs.length?`／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
-  </div>`;
-  if(payees.length){
+  const _pending=(window._companyPending&&window._companyPending.length)?window._companyPending:[];
+  const _pendBanner=_pending.length?pendingBannerHtml(_pending):'';
+  // 未確定現場がある間は合算サマリー(総額)を保留。確定済みツールの明細は下に表示される。
+  let html=_pendBanner+(_pending.length
+    ? `<div class="grand-total-card" style="background:#fff7ed;border-color:#f59e0b;">
+        <div class="label">🏢 ${escHtml(company)} / ${escHtml(ym)} 会社合計支払額</div>
+        <div class="value" style="font-size:20px;color:#b45309;">他現場 集計中…</div>
+        <div style="font-size:11px;color:#92400e;margin-top:6px;">${_pending.map(t=>escHtml(TOOL_LABEL[t]||t)).join('・')} が未確定です。<b>合算サマリー（総額）は全現場がそろってから</b>表示します。下記の確定済み明細は今すぐご確認いただけます。</div>
+      </div>`
+    : `<div class="grand-total-card">
+        <div class="label">🏢 ${escHtml(company)} / ${escHtml(ym)} ${dedTotal>0?'差引後 ':''}会社合計支払額（3ツール横断）</div>
+        <div class="value">${fmtYen(net)}</div>
+        <div style="font-size:11px;color:#92400e;margin-top:6px;">支払先 ${payees.length}件 ／ 外注費 ${fmtYen(total)}${zei>0?` ＋消費税 ${fmtYen(zei)}`:''}${dedTotal>0?` − 控除 ${fmtYen(dedTotal)}`:''}${_hasTax?' <span style="color:#15803d;">(適格)</span>':''} ${errs.length?`／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
+      </div>`);
+  // オーナー/担当(または管理者)は、会社の明細に異議申し立て可(中間・部分表示でも可)。確定保留にして担当が確認。
+  const _canObject = payees.length && (amAdminNow() || (window._myCentral && (window._myCentral.is_company_owner || window._myCentral.is_company_contact) && normCo(window._myCompany||'')===normCo(company)));
+  if(_canObject){
+    html+=`<div style="margin-bottom:12px;"><button class="btn" style="background:#f59e0b;color:#fff;font-size:12px;" onclick="openObjection('${escHtml(ym)}',true)">⚠ 異議申し立て（この会社の明細）</button>
+      <span style="font-size:11px;color:var(--text-sub);margin-left:8px;">確定分の内容に相違があればこちらから。確定保留として担当が確認します。</span></div>`;
+  }
+  if(payees.length && !_pending.length){
     html+=`<div style="margin-bottom:12px;text-align:right;"><button class="btn btn-pdf" style="background:#0ea5e9;" onclick="downloadCompanyPdf()">📦 法人まとめPDF（会社合計＋全支払先の明細）</button></div>`;
   }
   if(dedTotal>0){
@@ -1390,30 +1404,31 @@ async function loadAcceptanceBar(ym){
     </div>`;
   }
 }
-window.openObjection=function(ym){
+window.openObjection=function(ym, isCompany){
   const overlay=document.createElement('div'); overlay.className='modal-overlay';
   overlay.innerHTML=`<div class="modal">
-    <h3>⚠ 異議申し立て（${escHtml(ym)}分）</h3>
-    <p style="font-size:12px;color:var(--text-sub);">記載内容のどこに、どのような相違があるかをご記入ください（必須）。送信すると<b>確定保留</b>になり、担当者が確認します。</p>
+    <h3>⚠ 異議申し立て（${escHtml(ym)}分${isCompany?'・会社の明細':''}）</h3>
+    <p style="font-size:12px;color:var(--text-sub);">記載内容のどこに、どのような相違があるかをご記入ください（必須）。送信すると<b>確定保留</b>になり、担当者が確認します。${isCompany?'<br>※ 他現場が未確定でも、確定済み分の内容に相違があれば申し立てできます。':''}</p>
     <textarea id="obj-reason" class="input" rows="4" placeholder="例: 6/12の夕刊が計上されていない / 車両リースの金額が違う 等" style="width:100%;margin-bottom:8px;resize:vertical;"></textarea>
     <div id="obj-err" style="color:var(--danger);font-size:12px;margin-bottom:8px;display:none;"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button class="btn-ghost" onclick="this.closest('.modal-overlay').remove()">キャンセル</button>
-      <button class="btn" style="background:#f59e0b;" onclick="submitObjection('${escHtml(ym)}',this)">申し立てる</button>
+      <button class="btn" style="background:#f59e0b;" onclick="submitObjection('${escHtml(ym)}',this,${isCompany?'true':'false'})">申し立てる</button>
     </div></div>`;
   document.body.appendChild(overlay);
 };
-window.submitObjection=async function(ym,btn){
+window.submitObjection=async function(ym,btn,isCompany){
   const reason=($('obj-reason').value||'').trim();
   const err=$('obj-err');
   if(!reason){err.textContent='理由の入力は必須です';err.style.display='block';return;}
   btn.disabled=true;btn.textContent='送信中...';
+  const company=isCompany?(window._lastCompany||''):'';
   try{
-    const {data,error}=await sb.functions.invoke('pay-statement-object',{body:{month:ym,reason}});
+    const {data,error}=await sb.functions.invoke('pay-statement-object',{body:{month:ym,reason,company:company||undefined}});
     if(error||data?.error){err.textContent='送信失敗: '+((data&&data.error)||error?.message||'');err.style.display='block';btn.disabled=false;btn.textContent='申し立てる';return;}
     const ov=btn.closest('.modal-overlay'); if(ov)ov.remove();
     alert('異議申し立てを受け付けました。確定保留として担当者が確認します。');
-    loadAcceptanceBar(ym);
+    if(isCompany){ try{loadCompany(company);}catch(_){}}else{ try{loadAcceptanceBar(ym);}catch(_){}}
   }catch(e){err.textContent='送信失敗: '+(e.message||e);err.style.display='block';btn.disabled=false;btn.textContent='申し立てる';}
 };
 
@@ -1639,9 +1654,13 @@ async function pendingToolsForPerson(phone, ym, found){
 //  ※ staff_master.tools は中央マスタ未登録の支払先を取りこぼす(例: 新聞のラストワンマイル1/2)ため、
 //    会社ではグローバルな月次確定状況で判定する。未確定ツールがある=会社合計に未反映の支払先があり得る。
 async function pendingToolsForCompany(company, ym){
-  if(!amAdminNow())return [];
-  const fin=await finalizedToolsForMonth(ym);
-  return ['shift','askul','delivery'].filter(t=>fin[t]===false);
+  // 会社別の確定状況を pay-notify(company_status) で取得。登録現場のうち未反映かつ未確定のもの=これから来る現場。
+  // 管理者でなくても(オーナー/担当でも)判定できる。合算サマリー(総額)を全現場そろうまで保留するために使う。
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const r=await fetch(SUPABASE_URL+'/functions/v1/pay-notify',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+(session?.access_token||'')},body:JSON.stringify({mode:'company_status',month:ym,company})}).then(x=>x.json());
+    return (r&&r.ok&&Array.isArray(r.pendingTools))?r.pendingTools:[];
+  }catch(_){return [];}
 }
 function pendingBannerHtml(pending){
   if(!pending||!pending.length)return '';
