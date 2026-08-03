@@ -369,6 +369,7 @@ window.editMyInvoice=async function(){
 function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
 function fmtYen(n){return '¥'+Math.round(Number(n)||0).toLocaleString();}
+function fmtMD(ds){const d=new Date(ds);if(isNaN(d))return String(ds||'');return (d.getMonth()+1)+'月'+d.getDate()+'日';}
 
 function thisMonth(){
   const d=new Date();
@@ -1073,7 +1074,7 @@ function _payeeDetailFor(it){
   const st=it.st||{};
   let h='';
   if(it.toolKey==='shift')h=renderShiftDetail(st.rows||[]);
-  else if(it.toolKey==='askul')h=renderAskulDetail(st.daily_rows||[]);
+  else if(it.toolKey==='askul')h=renderAskulDetail(st);
   else if(it.toolKey==='delivery')h=renderDeliveryDetail(st.daily_rows||[]);
   return h||'<div style="color:var(--text-sub);font-size:12px;padding:6px 0;">日別明細なし</div>';
 }
@@ -1107,7 +1108,7 @@ window.togglePayeeDetail=function(idx){
       const st=p.st||{};
       let h='';
       if(p.toolKey==='shift')h=renderShiftDetail(st.rows||[]);
-      else if(p.toolKey==='askul')h=renderAskulDetail(st.daily_rows||[]);
+      else if(p.toolKey==='askul')h=renderAskulDetail(st);
       else if(p.toolKey==='delivery')h=renderDeliveryDetail(st.daily_rows||[]);
       h=(h||'<div style="color:var(--text-sub);font-size:12px;padding:8px 0;">日別明細なし</div>')
         +`<div style="text-align:right;margin-top:8px;"><button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="viewPayee(${idx})">→ この支払先を個別表示（PDF発行）</button></div>`;
@@ -1522,8 +1523,8 @@ function renderAskulCard(r,ym){
         <div class="amount-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:8px;"><span class="label">支払額</span><span class="amount-big">${fmtYen(s.payment_amount)}</span></div>
         `}
         <div class="muted" style="margin-top:6px;">確定 ${finalized}${modified}</div>
-        ${hide?'':`<button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
-        <div class="detail-body" style="display:none;">${renderAskulDetail(s.daily_rows||[])}</div>`}
+        ${hide?'':`<button class="detail-toggle" onclick="toggleDetail(this)">📅 日別・件数明細を見る</button>
+        <div class="detail-body" style="display:none;">${renderAskulDetail(s)}</div>`}
       </div>`;
     }).join('');
   }
@@ -1536,25 +1537,63 @@ function renderAskulCard(r,ym){
   </div>`;
 }
 
-function renderAskulDetail(rows){
-  if(!rows.length)return '<div class="empty">日別データなし</div>';
+// 引数は statement オブジェクト(旧: daily_rows 配列)。日別(個建/車建)表 + 件数明細(category_matrix)を返す。
+function renderAskulDetail(s){
+  // 後方互換: 配列(daily_rows)がそのまま渡された場合も動くように吸収。
+  const stmt=Array.isArray(s)?{daily_rows:s}:(s||{});
+  const rows=stmt.daily_rows||[];
   const dow=['日','月','火','水','木','金','土'];
-  return `<table class="detail">
-    <thead><tr><th>日付</th><th>曜日</th><th>個建</th><th>車建</th><th>件数</th><th>小計</th></tr></thead>
+  let h='';
+  if(!rows.length){
+    h+='<div class="empty">日別データなし</div>';
+  }else{
+    h+=`<table class="detail">
+      <thead><tr><th>日付</th><th>曜日</th><th>個建</th><th>車建</th><th>件数</th><th>小計</th></tr></thead>
+      <tbody>${rows.map(r=>{
+        const d=new Date(r.date);
+        const dn=d.getDay();
+        const cls=dn===0?'sun':(dn===6?'sat':'');
+        return `<tr class="${cls}">
+          <td>${escHtml(r.date||'')}</td>
+          <td class="center">${dow[dn]||''}</td>
+          <td class="right">${r.kodate?fmtYen(r.kodate):''}</td>
+          <td class="right">${r.vehicle?fmtYen(r.vehicle):''}</td>
+          <td class="right">${r.count||''}</td>
+          <td class="right" style="font-weight:600;">${fmtYen(r.subtotal||0)}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  }
+  h+=renderAskulMatrix(stmt.category_matrix);
+  return h;
+}
+
+// 件数明細(2枚目): 単価カテゴリ×日付の数量マトリクス。会計「支払通知書」別紙2枚目と同じ内容。
+// category_matrix = { prices:[9,100,..], labels:{price:name}, rows:[{date,dow,counts:{price:n}}], totals:{price:n}, applied_total }
+function renderAskulMatrix(cm){
+  if(!cm||!Array.isArray(cm.prices)||!cm.prices.length)return '';
+  const dow=['日','月','火','水','木','金','土'];
+  const prices=cm.prices, labels=cm.labels||{}, rows=cm.rows||[], totals=cm.totals||{};
+  let h=`<div style="margin-top:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+    <div style="font-weight:700;font-size:12px;color:var(--text-sub);">🔢 件数明細</div>
+    ${cm.applied_total!=null?`<div style="display:inline-block;background:#fff59d;color:#78350f;padding:3px 10px;border-radius:4px;font-size:12px;font-weight:700;">適用金額 ¥${Number(cm.applied_total).toLocaleString()}</div>`:''}
+  </div>
+  <div style="overflow-x:auto;margin-top:6px;"><table class="detail" style="min-width:${140+prices.length*56}px;">
+    <thead>
+      <tr><th rowspan="2">日付</th><th rowspan="2">曜日</th>${prices.map(p=>`<th class="center">${escHtml(labels[p]||('¥'+p+'区分'))}</th>`).join('')}</tr>
+      <tr>${prices.map(p=>`<th class="right" style="font-weight:400;">${p}</th>`).join('')}</tr>
+    </thead>
     <tbody>${rows.map(r=>{
-      const d=new Date(r.date);
-      const dn=d.getDay();
+      const dn=(r.dow!=null)?r.dow:new Date(r.date).getDay();
       const cls=dn===0?'sun':(dn===6?'sat':'');
-      return `<tr class="${cls}">
-        <td>${escHtml(r.date||'')}</td>
-        <td class="center">${dow[dn]||''}</td>
-        <td class="right">${r.kodate?fmtYen(r.kodate):''}</td>
-        <td class="right">${r.vehicle?fmtYen(r.vehicle):''}</td>
-        <td class="right">${r.count||''}</td>
-        <td class="right" style="font-weight:600;">${fmtYen(r.subtotal||0)}</td>
-      </tr>`;
-    }).join('')}</tbody>
-  </table>`;
+      const c=r.counts||{};
+      return `<tr class="${cls}"><td>${escHtml(fmtMD(r.date))}</td><td class="center">${dow[dn]||''}</td>${prices.map(p=>`<td class="right">${Number(c[p]||0).toLocaleString()}</td>`).join('')}</tr>`;
+    }).join('')}
+      <tr style="background:#f1f5f9;font-weight:700;"><td colspan="2">合計件数</td>${prices.map(p=>`<td class="right">${Number(totals[p]||0).toLocaleString()}</td>`).join('')}</tr>
+      <tr style="background:#f1f5f9;font-weight:700;"><td colspan="2">金額</td>${prices.map(p=>`<td class="right">¥${(Number(totals[p]||0)*Number(p)).toLocaleString()}</td>`).join('')}</tr>
+    </tbody>
+  </table></div>`;
+  return h;
 }
 
 function renderDeliveryCard(r,ym){
@@ -1992,9 +2031,40 @@ function buildAskulDetailHtml(){
       </tr>`;
     });
     h+='</tbody></table>';
+    h+=buildAskulMatrixHtml(s.category_matrix);
   }
   if(s.finalized_at)h+=`<div style="font-size:10px;color:#94a3b8;text-align:right;margin-top:10px;">確定 ${new Date(s.finalized_at).toLocaleString('ja-JP')}${s.modified_at?` / 修正 ${new Date(s.modified_at).toLocaleString('ja-JP')}`:''}</div>`;
   h+='</div>';
+  return h;
+}
+
+// 件数明細(2枚目) PDF 版。buildAskulDetailHtml の日別表の下に印刷スタイルで追加。
+function buildAskulMatrixHtml(cm){
+  if(!cm||!Array.isArray(cm.prices)||!cm.prices.length)return '';
+  const dow=['日','月','火','水','木','金','土'];
+  const prices=cm.prices, labels=cm.labels||{}, rows=cm.rows||[], totals=cm.totals||{};
+  const td='border:1px solid #94a3b8;padding:3px 5px;';
+  let h=`<div style="margin-top:22px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <div style="font-size:14px;font-weight:700;">件数明細</div>
+      ${cm.applied_total!=null?`<div style="background:#fff59d;padding:4px 12px;font-size:12px;font-weight:700;">適用金額 ¥${Number(cm.applied_total).toLocaleString()}</div>`:''}
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:10px;table-layout:fixed;">
+      <thead>
+        <tr style="background:#f1f5f9;"><th style="${td}" rowspan="2">日付</th><th style="${td}" rowspan="2">曜日</th>${prices.map(p=>`<th style="${td}text-align:center;">${escHtml(labels[p]||('¥'+p+'区分'))}</th>`).join('')}</tr>
+        <tr style="background:#f1f5f9;">${prices.map(p=>`<th style="${td}text-align:right;font-weight:400;">${p}</th>`).join('')}</tr>
+      </thead>
+      <tbody>${rows.map(r=>{
+        const dn=(r.dow!=null)?r.dow:new Date(r.date).getDay();
+        const bg=dn===0?'#fee2e2':(dn===6?'#fef3c7':'');
+        const c=r.counts||{};
+        return `<tr${bg?` style="background:${bg};"`:''}><td style="${td}">${escHtml(fmtMD(r.date))}</td><td style="${td}text-align:center;">${dow[dn]||''}</td>${prices.map(p=>`<td style="${td}text-align:right;">${Number(c[p]||0).toLocaleString()}</td>`).join('')}</tr>`;
+      }).join('')}
+        <tr style="background:#f3f4f6;font-weight:700;"><td style="${td}" colspan="2">合計件数</td>${prices.map(p=>`<td style="${td}text-align:right;">${Number(totals[p]||0).toLocaleString()}</td>`).join('')}</tr>
+        <tr style="background:#f3f4f6;font-weight:700;"><td style="${td}" colspan="2">金額</td>${prices.map(p=>`<td style="${td}text-align:right;">¥${(Number(totals[p]||0)*Number(p)).toLocaleString()}</td>`).join('')}</tr>
+      </tbody>
+    </table>
+  </div>`;
   return h;
 }
 
@@ -2207,7 +2277,7 @@ function buildPayeeDetailHtml(p){
   let detail='';
   const st=p.st||{};
   if(p.toolKey==='shift')detail=renderShiftDetail(st.rows||[]);
-  else if(p.toolKey==='askul')detail=renderAskulDetail(st.daily_rows||[]);
+  else if(p.toolKey==='askul')detail=renderAskulDetail(st);
   else if(p.toolKey==='delivery')detail=renderDeliveryDetail(st.daily_rows||[]);
   return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans',sans-serif;color:#111;padding:28px 32px;">
     <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid ${p.color};padding-bottom:8px;margin-bottom:14px;">
