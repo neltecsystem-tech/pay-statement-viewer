@@ -374,6 +374,11 @@ function thisMonth(){
   const d=new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
+// 対象月の既定=今月-1(前月分の支払を確認するのが基本)。
+function prevMonth(){
+  const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
 
 async function doLogin(){
   const email=$('login-email').value.trim();
@@ -400,7 +405,7 @@ async function postLogin(){
   $('screen-login').style.display='none';
   $('screen-main').style.display='block';
   $('hdr-user').textContent=`${profile.display_name||session.user.email}${(profile.role==='admin'||profile.role==='super_admin')?' (管理者)':''}`;
-  $('ym-input').value=thisMonth();
+  $('ym-input').value=prevMonth();
   // 表示対象月の制限: 2026年7月分より前は非管理者に表示しない(通知運用開始が7月から)。管理者は過去も閲覧可。
   if(!(profile.role==='admin'||profile.role==='super_admin')){
     $('ym-input').min='2026-07';
