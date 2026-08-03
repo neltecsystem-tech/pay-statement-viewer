@@ -1518,9 +1518,12 @@ function renderAskulCard(r,ym){
       return `<div style="border-top:1px dashed var(--border);padding-top:10px;margin-top:10px;">
         <div class="summary-row"><span class="summary-label">ドライバー</span><span class="summary-value">${escHtml(s.driver_name)}${s.company_name?` (${escHtml(s.company_name)})`:''}</span></div>
         ${hide?hideMsg():`
-        <div class="summary-row"><span class="summary-label">売上 (税抜)</span><span class="summary-value">${fmtYen(s.revenue)}</span></div>
-        <div class="summary-row"><span class="summary-label">控除 (-${(s.deduction_rate||0)}%)</span><span class="summary-value" style="color:var(--warning);">-${fmtYen(s.deduction_amount)}</span></div>
-        <div class="amount-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:8px;"><span class="label">支払額</span><span class="amount-big">${fmtYen(s.payment_amount)}</span></div>
+        ${s.kodate_total!=null?`<div class="summary-row"><span class="summary-label">個建 合計</span><span class="summary-value">${fmtYen(s.kodate_total)}</span></div>`:''}
+        ${s.vehicle_total?`<div class="summary-row"><span class="summary-label">車建 合計 (控除対象外)</span><span class="summary-value">${fmtYen(s.vehicle_total)}</span></div>`:''}
+        <div class="summary-row"><span class="summary-label">総売上 (税抜)</span><span class="summary-value">${fmtYen(s.revenue)}</span></div>
+        <div class="summary-row"><span class="summary-label">控除率 (個建のみ適用)</span><span class="summary-value">${(s.deduction_rate||0)}%</span></div>
+        <div class="summary-row"><span class="summary-label">控除額</span><span class="summary-value" style="color:var(--warning);">-${fmtYen(s.deduction_amount)}</span></div>
+        <div class="amount-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:8px;"><span class="label">お支払い額</span><span class="amount-big">${fmtYen(s.payment_amount)}</span></div>
         `}
         <div class="muted" style="margin-top:6px;">確定 ${finalized}${modified}</div>
         ${hide?'':`<button class="detail-toggle" onclick="toggleDetail(this)">📅 日別・件数明細を見る</button>
@@ -2043,10 +2046,12 @@ function buildAskulDetailHtml(){
   if(hideAmount){
     h+=`<div style="text-align:center;padding:40px;color:#64748b;background:#f8fafc;border-radius:8px;">法人/社員区分のため金額は非表示</div>`;
   }else{
-    h+=`<div style="display:flex;gap:10px;margin-bottom:16px;">
-      <div style="flex:1;background:#fff7ed;border-radius:8px;padding:12px;text-align:center;"><div style="font-size:11px;color:#9a3412;">売上 (税抜)</div><div style="font-size:16px;font-weight:700;color:#9a3412;margin-top:4px;">${fmtYen(s.revenue||0)}</div></div>
-      <div style="flex:1;background:#fef2f2;border-radius:8px;padding:12px;text-align:center;"><div style="font-size:11px;color:#991b1b;">控除 (${s.deduction_rate||0}%)</div><div style="font-size:16px;font-weight:700;color:#991b1b;margin-top:4px;">-${fmtYen(s.deduction_amount||0)}</div></div>
-      <div style="flex:1;background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:12px;text-align:center;"><div style="font-size:11px;color:#92400e;">支払額</div><div style="font-size:18px;font-weight:700;color:#92400e;margin-top:4px;">${fmtYen(s.payment_amount||0)}</div></div>
+    h+=`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+      ${s.kodate_total!=null?`<div style="flex:1;min-width:110px;background:#f8fafc;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:10px;color:#475569;">個建 合計</div><div style="font-size:14px;font-weight:700;color:#334155;margin-top:3px;">${fmtYen(s.kodate_total)}</div></div>`:''}
+      ${s.vehicle_total?`<div style="flex:1;min-width:110px;background:#f8fafc;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:10px;color:#475569;">車建 (控除対象外)</div><div style="font-size:14px;font-weight:700;color:#334155;margin-top:3px;">${fmtYen(s.vehicle_total)}</div></div>`:''}
+      <div style="flex:1;min-width:110px;background:#fff7ed;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:10px;color:#9a3412;">総売上 (税抜)</div><div style="font-size:14px;font-weight:700;color:#9a3412;margin-top:3px;">${fmtYen(s.revenue||0)}</div></div>
+      <div style="flex:1;min-width:110px;background:#fef2f2;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:10px;color:#991b1b;">控除 (個建×${s.deduction_rate||0}%)</div><div style="font-size:14px;font-weight:700;color:#991b1b;margin-top:3px;">-${fmtYen(s.deduction_amount||0)}</div></div>
+      <div style="flex:1;min-width:120px;background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:10px;color:#92400e;">お支払い額</div><div style="font-size:16px;font-weight:700;color:#92400e;margin-top:3px;">${fmtYen(s.payment_amount||0)}</div></div>
     </div>`;
     h+=`<table style="width:100%;border-collapse:collapse;font-size:11px;">
       <thead><tr style="background:#f1f5f9;">
