@@ -1219,6 +1219,11 @@ function accCompanyDeduction(company,month){
   });
   return {items,total:items.reduce((a,x)=>a+x.amount,0)};
 }
+// 支払通知が未発行の月は明細を公開しない(EFが reason='not_published' を返す)。
+// 「データが無い」ではなく「まだ公開されていない」ことが分かる表示にする。
+function notPublishedHtml(r){
+  return `<div class="empty" style="line-height:1.8;">🔒 ${escHtml(r?.message||'この月の明細は支払通知書の発行後に公開されます。')}</div>`;
+}
 // 法人まとめ用: 会社名がマスタに無いときのフォールバック。支払先(氏名)ごとに全控除項目を拾う。
 // 画面プレビューと法人まとめPDFで必ず同じ結果になるよう1箇所に集約する(片方だけ項目漏れを起こさない)。
 function accPayeesDedItems(payees,month){
@@ -1472,7 +1477,7 @@ function renderShiftCard(r,ym){
   if(r?.error){
     body=`<div class="empty" style="color:var(--danger);">エラー: ${escHtml(r.error)}</div>`;
   }else if(!r?.found){
-    body=`<div class="empty">この月の確定明細はまだ公開されていません</div>`;
+    body=r?.reason==='not_published'?notPublishedHtml(r):`<div class="empty">この月の確定明細はまだ公開されていません</div>`;
   }else{
     body=(r.statements||[]).map(s=>{
       const finalized=s.finalized_at?new Date(s.finalized_at).toLocaleString('ja-JP'):'';
@@ -1524,7 +1529,7 @@ function renderAskulCard(r,ym){
   if(r?.error){
     body=`<div class="empty" style="color:var(--danger);">エラー: ${escHtml(r.error)}</div>`;
   }else if(!r?.found){
-    body=`<div class="empty">${r?.reason==='phone_not_registered'?'電話番号がアスクル管理に未登録です':'この月の確定明細はまだありません'}</div>`;
+    body=r?.reason==='not_published'?notPublishedHtml(r):`<div class="empty">${r?.reason==='phone_not_registered'?'電話番号がアスクル管理に未登録です':'この月の確定明細はまだありません'}</div>`;
   }else{
     body=(r.statements||[]).map(s=>{
       const finalized=s.finalized_at?new Date(s.finalized_at).toLocaleString('ja-JP'):'';
@@ -1619,7 +1624,7 @@ function renderDeliveryCard(r,ym){
   if(r?.error){
     body=`<div class="empty" style="color:var(--danger);">エラー: ${escHtml(r.error)}</div>`;
   }else if(!r?.found){
-    body=`<div class="empty">${r?.reason==='phone_not_registered'?'電話番号がデリバリー管理に未登録です':'稼働実績がありません'}</div>`;
+    body=r?.reason==='not_published'?notPublishedHtml(r):`<div class="empty">${r?.reason==='phone_not_registered'?'電話番号がデリバリー管理に未登録です':'稼働実績がありません'}</div>`;
   }else{
     body=(r.statements||[]).map(s=>{
       const status=s.finalized?`<span class="status-pill status-final">確定</span>`:`<span class="status-pill status-draft">未確定 (集計値)</span>`;
