@@ -849,7 +849,7 @@ function renderCompanyAgg(company, ym, tools){
   // 無ければ支払先(氏名)ごとに完全一致で拾う。
   let {items:dedItems}=accCompanyDeduction(company,ym);
   if(!dedItems.length){
-    payees.forEach(p=>{ const d=accDeductionFor(p.name,ym); if(d.lease>0)dedItems.push({name:`${p.name}（車両リース料）`,amount:d.lease}); if(d.advance>0)dedItems.push({name:`${p.name}（立替金）`,amount:d.advance}); if(d.calc_fee>0)dedItems.push({name:`${p.name}（計算手数料）`,amount:d.calc_fee}); if(d.loan>0)dedItems.push({name:`${p.name}（貸付金返済）`,amount:d.loan}); if(d.receivable>0)dedItems.push({name:`${p.name}（未収入金）`,amount:d.receivable}); (d.customItems||[]).forEach(c=>{if(c.amount>0)dedItems.push({name:`${p.name}（${c.name||'その他控除'}）`,amount:c.amount});}); });
+    dedItems=accPayeesDedItems(payees,ym);
   }
   const dedTotal=dedItems.reduce((a,d)=>a+d.amount,0);
   // 適格判定(会計マスタ invPartners)→適格なら消費税(10%)を上乗せ(支払通知書PDFと一致)。外注費(税抜)=ツール合計。
@@ -1218,6 +1218,21 @@ function accCompanyDeduction(company,month){
     (d.customItems||[]).forEach(c=>{if(c.amount>0)items.push({name:`${row.name}（${c.name||'その他控除'}）`,amount:c.amount});});
   });
   return {items,total:items.reduce((a,x)=>a+x.amount,0)};
+}
+// 法人まとめ用: 会社名がマスタに無いときのフォールバック。支払先(氏名)ごとに全控除項目を拾う。
+// 画面プレビューと法人まとめPDFで必ず同じ結果になるよう1箇所に集約する(片方だけ項目漏れを起こさない)。
+function accPayeesDedItems(payees,month){
+  const items=[];
+  (payees||[]).forEach(p=>{
+    const d=accDeductionFor(p.name,month);
+    if(d.lease>0)items.push({name:`${p.name}（車両リース料）`,amount:d.lease});
+    if(d.advance>0)items.push({name:`${p.name}（立替金）`,amount:d.advance});
+    if(d.calc_fee>0)items.push({name:`${p.name}（計算手数料）`,amount:d.calc_fee});
+    if(d.loan>0)items.push({name:`${p.name}（貸付金返済）`,amount:d.loan});
+    if(d.receivable>0)items.push({name:`${p.name}（未収入金）`,amount:d.receivable});
+    (d.customItems||[]).forEach(c=>{if(c.amount>0)items.push({name:`${p.name}（${c.name||'その他控除'}）`,amount:c.amount});});
+  });
+  return items;
 }
 // 明細ビューア用の差引項目配列に変換 (車両リース料 / 立替金 / 計算手数料 / 貸付金返済)
 function accDedItems(name,month){
@@ -2333,7 +2348,7 @@ async function downloadCompanyPdf(){
   try{
     const toolTotal=payees.reduce((a,p)=>a+p.amount,0);
     let {items:dedItems}=accCompanyDeduction(company,ym);
-    if(!dedItems.length){ payees.forEach(p=>{ const d=accDeductionFor(p.name,ym); if(d.lease>0)dedItems.push({name:`${p.name}（車両リース料）`,amount:d.lease}); if(d.loan>0)dedItems.push({name:`${p.name}（貸付金返済）`,amount:d.loan}); }); }
+    if(!dedItems.length){ dedItems=accPayeesDedItems(payees,ym); }
     const dedTotal=dedItems.reduce((a,d)=>a+d.amount,0);
     const sections=[buildCompanyCoverHtml(company,ym,payees,dedItems,dedTotal,toolTotal)];
     payees.forEach(p=>{
