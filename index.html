@@ -977,6 +977,25 @@ async function loadStaffMatrix(){
   staffMatrix={byPhone,byName,byCompany,rows,ok:rows.length>0};
   return staffMatrix;
 }
+// 現場ツールの当月「確定」状況。pipeline-status EF(会計のシステム別スケジュールと同じ)を使う。
+// 稼働者がゼロの月でも finalized_at が入るので、未稼働とツール未確定を取り違えない。
+let toolFinal=null; // {shift:bool, askul:bool, delivery:bool} / 取得失敗時は null
+async function loadToolFinalized(ym){
+  toolFinal=null;
+  try{
+    const r=await fetch(SUPABASE_URL+'/functions/v1/pipeline-status',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(session&&session.access_token||''),'apikey':SUPABASE_ANON},
+      body:JSON.stringify({month:ym,auth_token:(session&&session.access_token)||''})
+    });
+    const j=await r.json();
+    if(!j||!j.ok||!Array.isArray(j.tools))return null;
+    const pick=n=>j.tools.find(t=>t.tool===n);
+    const fin=t=>!!(t&&(t.finalized_at||t.count>0));
+    toolFinal={shift:fin(pick('新聞')),askul:fin(pick('アスクル')),delivery:fin(pick('ヤマト'))};
+  }catch(_){toolFinal=null;}
+  return toolFinal;
+}
 function matrixRow(name,phone){
   if(!staffMatrix||!staffMatrix.ok)return null;
   const ph=normalizePhone(phone||'');
@@ -1028,7 +1047,7 @@ async function loadAllPayees(){
   area.innerHTML=`<div class="card center"><div class="spinner"></div> ${escHtml(ym)} の取引先一覧を集計中（新聞・アスクル・デリバリー横断）...</div>`;
   $('btn-summary-pdf').disabled=true; $('btn-all-pdf').disabled=true; currentData=null;
   try{
-    const [tools]=await Promise.all([fetchAllTools(ym),loadAccDeductions(ym),loadStaffMatrix()]);
+    const [tools]=await Promise.all([fetchAllTools(ym),loadAccDeductions(ym),loadStaffMatrix(),loadToolFinalized(ym)]);
     const authErr=[['新聞',tools.shift],['アスクル',tools.askul],['デリバリー',tools.delivery]].filter(([_,t])=>t&&t.code===403);
     if(authErr.length===3){ area.innerHTML=`<div class="card" style="color:var(--danger);">取引先一覧は管理者のみ利用できます。</div>`; return; }
     window._lastTools=tools; // 再確定ボタン用(確定済みツール判定)
@@ -1037,11 +1056,14 @@ async function loadAllPayees(){
 }
 
 function renderPayeeList(ym,groups,tools){
-  // 現場ごとの取得状況。ok=当月の明細が取れている / それ以外(エラー・0件)は「未取得」扱い。
+  // 現場ごとの状態は「そのツールが当月を確定しているか」だけで判定する。
+  // 確定済みなら、本人の明細が無いのは単に当月未稼働(サマリーは作れる)。
+  // 取得できないときだけ、明細が1件でも返っているかで代用する。
   const toolStatus={};
   ['shift','askul','delivery'].forEach(k=>{
     const t=tools&&tools[k];
-    toolStatus[k]=(t&&!t.error&&(t.statements||[]).length>0)?'ok':'missing';
+    const finalized=toolFinal?!!toolFinal[k]:(t&&!t.error&&(t.statements||[]).length>0);
+    toolStatus[k]=finalized?'ok':'missing';
   });
   groups.sort((a,b)=>b.total-a.total);
   groups.forEach((g,i)=>g._i=i);
@@ -1063,9 +1085,9 @@ function renderPayeeList(ym,groups,tools){
     g._idleTools=lack.filter(t=>toolStatus[t]==='ok');   // 当月は稼働なし
     const memberMiss=mt?mt.members.filter(m=>!g.items.some(it=>nmKeyV(it.name)===m.nk)):[];
     // 所属メンバーの欠落も同じ基準: 本人の現場がすべて取得できているなら「未稼働」とみなす
-    g._missMembers=memberMiss.filter(m=>[...m.tools].some(t=>toolStatus[t]!=='ok')).map(m=>m.name);
-    g._idleMembers=memberMiss.filter(m=>![...m.tools].some(t=>toolStatus[t]!=='ok')).map(m=>m.name);
-    g._blocked=g._missTools.length>0||g._missMembers.length>0; // サマリーを生成しない
+    g._missMembers=[]; // メンバー単位ではブロックしない(確定済みなら未稼働とみなす)
+    g._idleMembers=memberMiss.map(m=>m.name);
+    g._blocked=g._missTools.length>0; // 稼働している現場が未確定の時だけサマリーを作らない
   });
   const outTotal=groups.reduce((a,g)=>a+g.total,0);
   const taxTotal=groups.reduce((a,g)=>a+(g._zei||0),0);
