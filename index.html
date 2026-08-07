@@ -418,7 +418,10 @@ async function postLogin(){
     $('ym-input').min='2026-07';
     if($('ym-input').value<'2026-07')$('ym-input').value='2026-07';
   }
-  if(profile.role==='admin'||profile.role==='super_admin'){
+  // 🔒 他人の明細検索/取引先一覧は「NELTEC社員」のみ。管理者権限を持つ委託ドライバー(個人事業主)には出さない。
+  //    判定は中央人材マスタ staff_master.category='社員'。super_admin は保守用に常に許可。
+  await loadMyCentral();
+  if(amStaffNow()){
     $('admin-toggle-wrap').style.display='inline-flex';
     // メンバー管理は中央マスタ(人材マスタ)に一本化したため非表示
     $('btn-central-master').style.display='inline-flex';
@@ -602,12 +605,29 @@ window.saveCentral=async function(match_key,i,btn){
 };
 
 // 中央人材マスタで法人配下判定。法人配下かつ owner/担当者でなければ true(ブロック)。中央未登録は通す(fail-open)。
+// 中央人材マスタ(staff_master)の自分の行を取得。profile_id 優先・無ければ電話で照合。
+//   ログイン直後に1回だけ呼び、社員判定(amStaffNow)と法人ゲートで共用する。
+async function loadMyCentral(){
+  if(window._myCentral)return window._myCentral;
+  try{
+    const ph=normalizePhone(profile?.phone||'');
+    const or=[`profile_id.eq.${session.user.id}`,ph?`phone.eq.${ph}`:''].filter(Boolean).join(',');
+    const {data}=await sb.from('staff_master').select('category,is_company_owner,is_company_contact,company_name').or(or).limit(1);
+    window._myCentral=(data&&data[0])||null;
+  }catch(_){ window._myCentral=window._myCentral||null; }
+  return window._myCentral;
+}
+// NELTEC社員か(他人の明細検索・取引先一覧の利用条件)。super_admin は保守用に常に許可。
+function amStaffNow(){
+  if(profile?.role==='super_admin')return true;
+  return !!(window._myCentral && window._myCentral.category==='社員');
+}
 async function checkCentralGate(phone){
   try{
     const ph=normalizePhone(phone);
     if(!ph)return false;
     const {data}=await sb.from('staff_master').select('category,is_company_owner,is_company_contact,company_name').eq('phone',ph).maybeSingle();
-    window._myCentral=data||null;
+    window._myCentral=data||window._myCentral||null; // profile_id で引けている場合は消さない
     if(!data)return false;
     if(data.category==='法人配下' && !data.is_company_owner && !data.is_company_contact){ window._blockInfo=data; return true; }
     return false;
@@ -775,8 +795,49 @@ async function searchByName(query){
       </div>
     </div>`;
   }).join('');
-  results.innerHTML=companyHtml+((data&&data.length)?personHtml:`<div style="padding:10px;color:var(--text-sub);font-size:12px;">該当する個人はいません（法人の場合は上の「🏢 法人としてまとめて表示」を押してください）</div>`);
+  // 🔎 NexPortアカウントが無い人は profiles に出てこない(=検索で出ない)。
+  //    中央人材マスタ(staff_master)も氏名・会社名で検索し、重複しない人を候補に足す。
+  let centralHtml='';
+  try{
+    const q=String(query).replace(/[,()]/g,' ').trim();
+    if(q){
+      const {data:cm}=await sb.from('staff_master')
+        .select('id, full_name, phone, company_name, category, profile_id, hidden')
+        .or(`full_name.ilike.%${q}%,company_name.ilike.%${q}%`).limit(50);
+      const profKeys=new Set((data||[]).map(p=>nmKeyV(p.display_name||'')));
+      const profPhones=new Set((data||[]).map(p=>normalizePhone(p.phone||'')).filter(Boolean));
+      const extra=(cm||[]).filter(r=>!r.hidden)
+        .filter(r=>!profKeys.has(nmKeyV(r.full_name||''))&&!(r.phone&&profPhones.has(normalizePhone(r.phone))));
+      window._searchCentral=extra;
+      centralHtml=extra.map(r=>{
+        const cat=r.category?`<span style="background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">${escHtml(r.category)}</span>`:'';
+        const phoneCell=r.phone
+          ?`<div style="font-size:11px;color:var(--text-sub);font-family:monospace;">${escHtml(r.phone)}</div>`
+          :`<div style="font-size:10px;color:#b45309;background:#fef3c7;border-radius:8px;padding:1px 7px;">電話未登録・氏名照合</div>`;
+        return `<div onclick="pickCentral('${escHtml(r.id)}')" style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fdfdfd;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fdfdfd'">
+          <div>
+            <div style="font-weight:600;font-size:13px;">${escHtml(r.full_name||'(名前未設定)')}${cat}<span style="background:#ede9fe;color:#5b21b6;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px;">人材マスタ</span></div>
+            ${r.company_name?`<div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${escHtml(r.company_name)}</div>`:''}
+            <div style="font-size:10px;color:var(--text-sub);margin-top:2px;">NexPortアカウント無し（氏名/電話で明細を照会）</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">${phoneCell}</div>
+        </div>`;
+      }).join('');
+    }
+  }catch(_){ centralHtml=''; }
+  const noHit=!(data&&data.length)&&!centralHtml;
+  results.innerHTML=companyHtml+personHtml+centralHtml+(noHit?`<div style="padding:10px;color:var(--text-sub);font-size:12px;">該当する個人はいません（法人の場合は上の「🏢 法人としてまとめて表示」を押してください）</div>`:'');
 }
+
+// 中央人材マスタの候補を選択(NexPortアカウント無し)。電話があれば電話照合、無ければ氏名照合。
+window.pickCentral=function(id){
+  const r=(window._searchCentral||[]).find(x=>String(x.id)===String(id));
+  if(!r)return;
+  $('admin-phone-input').value=r.phone||'';
+  $('admin-name-input').value=r.full_name||'';
+  $('admin-name-results').style.display='none';
+  loadFor(normalizePhone(r.phone||''), r.full_name||'', null);
+};
 
 window.toggleOwner=async function(profileId,newValue){
   if(!confirm(newValue?'この人を法人オーナーに設定しますか?\n→ 自分の支払明細を見られるようになります':'オーナー設定を解除しますか?\n→ 法人ドライバー扱いになり、自分の金額は見られなくなります'))return;
@@ -1095,9 +1156,20 @@ function renderPayeeList(ym,groups,tools){
 
 // ── 取引先一覧の表示（現場フィルタ + 並び替え）──
 //   現場 = 新聞 / アスクル / デリバリー。現場を選ぶと、その現場の支払額だけを集計して表示する。
-let _payeeCtx=null, _payeeSite='all', _payeeSort='amount';
+let _payeeCtx=null, _payeeSite='all', _payeeSort='amount', _payeeArea='all';
 const SITE_ORDER=['shift','askul','delivery'];
-function setPayeeSite(s){ _payeeSite=s; renderPayeeView(); }
+const AREA_ORDER=['城北','川越','立川','川崎高津'];
+// 新聞の営業所一覧(明細の primary_area)。既知の並び順を優先し、未知の営業所は後ろに追加。
+function shiftAreas(){
+  const set=new Set();
+  (_allGroups||[]).forEach(g=>g.items.forEach(it=>{ if(it.toolKey==='shift'&&it.sub)String(it.sub).split(/[・,、]/).forEach(a=>{const t=a.trim();if(t)set.add(t);}); }));
+  const known=AREA_ORDER.filter(a=>set.has(a));
+  const rest=[...set].filter(a=>!AREA_ORDER.includes(a)).sort((a,b)=>a.localeCompare(b,'ja'));
+  return [...known,...rest];
+}
+function itemInArea(it,area){ return area==='all'||(it.toolKey==='shift'&&String(it.sub||'').split(/[・,、]/).map(s=>s.trim()).includes(area)); }
+function setPayeeArea(a){ _payeeArea=a; renderPayeeView(); }
+function setPayeeSite(s){ _payeeSite=s; if(s!=='shift')_payeeArea='all'; renderPayeeView(); }
 function setPayeeSort(s){ _payeeSort=s; renderPayeeView(); }
 // その取引先の「主な現場」= 表示対象の中で金額が最大の現場
 function primarySite(g,items){ let best='',mx=-1; (items||[]).forEach(it=>{ if(it.amount>mx){mx=it.amount;best=it.toolKey;} }); return best; }
@@ -1131,13 +1203,15 @@ function renderPayeeView(){
   const groups=_allGroups;
   const site=_payeeSite;
   // 現場フィルタ: 選択した現場の明細を持つ取引先のみ。金額もその現場分だけで集計する。
+  const area=(site==='shift')?_payeeArea:'all';
   const view=groups.map(g=>{
-    const items=site==='all'?g.items:g.items.filter(it=>it.toolKey===site);
+    let items=site==='all'?g.items:g.items.filter(it=>it.toolKey===site);
+    if(area!=='all')items=items.filter(it=>itemInArea(it,area)); // 新聞: 営業所(城北/川越/立川/川崎高津)で絞り込み
     if(!items.length)return null;
     const total=items.reduce((a,it)=>a+it.amount,0);
     // 控除(車両リース/立替金/貸付金返済など)は取引先まるごとに掛かるため、
     // 現場で絞り込んでいる時は控除を当てず「その現場の外注費+税」を表示する。
-    const dedItems=site==='all'?payeeDedItems(g,ym):[];
+      const dedItems=(site==='all')?payeeDedItems(g,ym):[];
     const {zei,ded,pay}=payeePayAmount(total,!!g._hasTax,dedItems);
     return {g,items,total,zei,ded,pay,dedItems};
   }).filter(Boolean);
@@ -1165,7 +1239,7 @@ function renderPayeeView(){
   const grand=view.reduce((a,v)=>a+v.pay,0);
   const errs=[['新聞',tools.shift],['アスクル',tools.askul],['デリバリー',tools.delivery]].filter(([_,t])=>t&&t.error).map(([n])=>n);
   const nCorp=view.filter(v=>v.g.kind==='company').length, nPer=view.length-nCorp;
-  const siteLabel={all:'3ツール横断',shift:'🗞 新聞',askul:'📦 アスクル',delivery:'🚚 デリバリー'}[site];
+  const siteLabel=({all:'3ツール横断',shift:'🗞 新聞',askul:'📦 アスクル',delivery:'🚚 デリバリー'}[site])+(area!=='all'?` / ${area}`:'');
   let html=`<div class="grand-total-card">
     <div class="label">📋 ${escHtml(ym)} 取引先一覧 ${site==='all'?'お支払額 合計':'外注費 合計'}（${siteLabel}）</div>
     <div class="value">${fmtYen(grand)}</div>
@@ -1175,6 +1249,7 @@ function renderPayeeView(){
   // 現場フィルタ + 並び替え
   const sbtn=(k,label)=>`<button class="btn" onclick="setPayeeSite('${k}')" style="font-size:12px;padding:5px 12px;${_payeeSite===k?'background:#6366f1;color:#fff;':'background:#f1f5f9;color:#475569;'}">${label}</button>`;
   const obtn=(k,label)=>`<button class="btn" onclick="setPayeeSort('${k}')" style="font-size:12px;padding:5px 12px;${_payeeSort===k?'background:#0ea5e9;color:#fff;':'background:#f1f5f9;color:#475569;'}">${label}</button>`;
+  const abtn=(k,label)=>`<button class="btn" onclick="setPayeeArea('${String(k).replace(/'/g,"\\'")}')" style="font-size:12px;padding:5px 12px;${_payeeArea===k?'background:#0ea5e9;color:#fff;':'background:#f1f5f9;color:#475569;'}">${escHtml(label)}</button>`;
   html+=`<div class="card" style="padding:10px 12px;margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
       <span style="font-size:11px;color:var(--text-sub);font-weight:600;">現場</span>
@@ -1184,6 +1259,10 @@ function renderPayeeView(){
       <span style="font-size:11px;color:var(--text-sub);font-weight:600;">並び順</span>
       ${obtn('amount','金額の多い順')}${obtn('site','現場順')}${obtn('area','営業所順')}${obtn('name','名前順')}
     </div>
+    ${site==='shift'?`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex-basis:100%;border-top:1px dashed var(--border);padding-top:8px;">
+      <span style="font-size:11px;color:var(--text-sub);font-weight:600;">🗞 営業所</span>
+      ${abtn('all','すべて')}${shiftAreas().map(a=>abtn(a,a)).join('')}
+    </div>`:''}
   </div>
   <div style="margin-bottom:12px;text-align:right;">
     <button class="btn" style="background:#f59e0b;color:#fff;" onclick="refinalizeMonth()" title="確定後にツール側(法人名・単価・稼働など)を修正した場合、確定済みツールを最新の元データで再確定し、ビューア/PDFへ反映します">🔄 変更を反映（再確定）</button>
