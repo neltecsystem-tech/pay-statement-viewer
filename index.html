@@ -1081,7 +1081,7 @@ function _payeeDetailFor(it){
   let h='';
   if(it.toolKey==='shift')h=renderShiftDetail(st.rows||[]);
   else if(it.toolKey==='askul')h=renderAskulDetail(st);
-  else if(it.toolKey==='delivery')h=renderDeliveryDetail(st.daily_rows||[]);
+  else if(it.toolKey==='delivery')h=renderDeliveryDetail(st.daily_rows||[],st.daily_kind);
   return h||'<div style="color:var(--text-sub);font-size:12px;padding:6px 0;">日別明細なし</div>';
 }
 window.togglePayeeGroup=function(i){
@@ -1115,7 +1115,7 @@ window.togglePayeeDetail=function(idx){
       let h='';
       if(p.toolKey==='shift')h=renderShiftDetail(st.rows||[]);
       else if(p.toolKey==='askul')h=renderAskulDetail(st);
-      else if(p.toolKey==='delivery')h=renderDeliveryDetail(st.daily_rows||[]);
+      else if(p.toolKey==='delivery')h=renderDeliveryDetail(st.daily_rows||[],st.daily_kind);
       h=(h||'<div style="color:var(--text-sub);font-size:12px;padding:8px 0;">日別明細なし</div>')
         +`<div style="text-align:right;margin-top:8px;"><button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="viewPayee(${idx})">→ この支払先を個別表示（PDF発行）</button></div>`;
       box.innerHTML=h; box.dataset.loaded='1';
@@ -1646,7 +1646,7 @@ function renderDeliveryCard(r,ym){
         `}
         ${finalized?`<div class="muted" style="margin-top:6px;">確定 ${finalized}</div>`:''}
         ${hide?'':`<button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
-        <div class="detail-body" style="display:none;">${renderDeliveryDetail(s.daily_rows||[])}</div>`}
+        <div class="detail-body" style="display:none;">${renderDeliveryDetail(s.daily_rows||[],s.daily_kind)}</div>`}
       </div>`;
     }).join('');
   }
@@ -1658,9 +1658,26 @@ function renderDeliveryCard(r,ym){
   </div>`;
 }
 
-function renderDeliveryDetail(rows){
+function renderDeliveryDetail(rows,kind){
   if(!rows.length)return '<div class="empty">日別データなし</div>';
   const dow=['日','月','火','水','木','金','土'];
+  // 東スポはシフト(稼働日×日当)で決まるので、配達個数ではなく稼働者・コースを出す
+  if(kind==='tokyosp'||rows.some(r=>r.worker!==undefined||r.course!==undefined)){
+    return `<table class="detail">
+      <thead><tr><th>日付</th><th>曜日</th><th>稼働者</th><th>コース</th><th>金額</th></tr></thead>
+      <tbody>${rows.map(r=>{
+        const d=new Date(r.date);const dn=d.getDay();
+        const cls=dn===0?'sun':(dn===6?'sat':'');
+        return `<tr class="${cls}">
+          <td>${escHtml(r.date||'')}</td>
+          <td class="center">${dow[dn]||''}</td>
+          <td>${escHtml(r.worker||'')}</td>
+          <td>${escHtml(r.course||'')}</td>
+          <td class="right">${r.revenue?fmtYen(r.revenue):''}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  }
   return `<table class="detail">
     <thead><tr><th>日付</th><th>曜日</th><th>配達</th><th>集荷</th><th>個口</th><th>売上</th><th>手当</th></tr></thead>
     <tbody>${rows.map(r=>{
@@ -2168,15 +2185,19 @@ function buildDeliveryDetailHtml(){
     ${s.deduction_amount?`<div style="flex:1;min-width:120px;background:#fef2f2;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:10px;color:#991b1b;">控除</div><div style="font-size:15px;font-weight:700;color:#991b1b;margin-top:2px;">-${fmtYen(s.deduction_amount)}</div></div>`:''}
     <div style="flex:1;min-width:120px;background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:10px;color:#92400e;">${s.finalized?'支払額':'支払額 (見込)'}</div><div style="font-size:16px;font-weight:700;color:#92400e;margin-top:2px;">${fmtYen(s.payment_amount||0)}</div></div>
   </div>`;
+  // 東スポ(シフト由来)は列が違う: 稼働者・コース・金額
+  const tsPdf=(s.daily_kind==='tokyosp')||(s.daily_rows||[]).some(r=>r.worker!==undefined||r.course!==undefined);
   h+=`<table style="width:100%;border-collapse:collapse;font-size:11px;">
     <thead><tr style="background:#f1f5f9;">
       <th style="border:1px solid #94a3b8;padding:5px;">日付</th>
       <th style="border:1px solid #94a3b8;padding:5px;">曜日</th>
-      <th style="border:1px solid #94a3b8;padding:5px;">配達</th>
+      ${tsPdf?`<th style="border:1px solid #94a3b8;padding:5px;">稼働者</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">コース</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">金額</th>`:`<th style="border:1px solid #94a3b8;padding:5px;">配達</th>
       <th style="border:1px solid #94a3b8;padding:5px;">集荷</th>
       <th style="border:1px solid #94a3b8;padding:5px;">個口</th>
       <th style="border:1px solid #94a3b8;padding:5px;">売上</th>
-      <th style="border:1px solid #94a3b8;padding:5px;">手当</th>
+      <th style="border:1px solid #94a3b8;padding:5px;">手当</th>`}
     </tr></thead><tbody>`;
   (s.daily_rows||[]).forEach(r=>{
     const d=new Date(r.date);const dn=d.getDay();
@@ -2184,11 +2205,13 @@ function buildDeliveryDetailHtml(){
     h+=`<tr${bg?` style="background:${bg};"`:''}>
       <td style="border:1px solid #94a3b8;padding:3px 6px;">${escHtml(r.date||'')}</td>
       <td style="border:1px solid #94a3b8;padding:3px;text-align:center;">${dow[dn]||''}</td>
-      <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.delivery_count||''}</td>
+      ${tsPdf?`<td style="border:1px solid #94a3b8;padding:3px 6px;">${escHtml(r.worker||'')}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;">${escHtml(r.course||'')}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.revenue?fmtYen(r.revenue):''}</td>`:`<td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.delivery_count||''}</td>
       <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.pickup_count||''}</td>
       <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.package_count||''}</td>
       <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.revenue?fmtYen(r.revenue):''}</td>
-      <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.allowance?fmtYen(r.allowance):''}</td>
+      <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.allowance?fmtYen(r.allowance):''}</td>`}
     </tr>`;
   });
   h+='</tbody></table>';
@@ -2340,7 +2363,7 @@ function buildPayeeDetailHtml(p){
   // アスクルは お支払い額計算の内訳 + 日別表(件数明細は別ページ buildAskulMatrixPage)。
   if(p.toolKey==='shift')detail=renderShiftDetail(st.rows||[]);
   else if(p.toolKey==='askul')detail=buildAskulSummaryBoxes(st)+renderAskulDaily(st.daily_rows||[]);
-  else if(p.toolKey==='delivery')detail=renderDeliveryDetail(st.daily_rows||[]);
+  else if(p.toolKey==='delivery')detail=renderDeliveryDetail(st.daily_rows||[],st.daily_kind);
   return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans',sans-serif;color:#111;padding:28px 32px;">
     <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid ${p.color};padding-bottom:8px;margin-bottom:14px;">
       <div><div style="font-size:11px;color:#64748b;">${p.tool}　別紙明細</div>
