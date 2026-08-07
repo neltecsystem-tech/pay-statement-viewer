@@ -1037,6 +1037,12 @@ async function loadAllPayees(){
 }
 
 function renderPayeeList(ym,groups,tools){
+  // 現場ごとの取得状況。ok=当月の明細が取れている / それ以外(エラー・0件)は「未取得」扱い。
+  const toolStatus={};
+  ['shift','askul','delivery'].forEach(k=>{
+    const t=tools&&tools[k];
+    toolStatus[k]=(t&&!t.error&&(t.statements||[]).length>0)?'ok':'missing';
+  });
   groups.sort((a,b)=>b.total-a.total);
   groups.forEach((g,i)=>g._i=i);
   _allGroups=groups;
@@ -1046,13 +1052,20 @@ function renderPayeeList(ym,groups,tools){
     const hit=(invPartners||[]).find(p=>normCo(p.name)===normCo(g.label||g.company||'')&&_okM(p));
     g._hasTax=!!(hit&&(hit.registered!==false)&&hit.invoice_number);
     g._zei=g._hasTax?Math.round(g.total*0.1):0;
-    // 会計マトリクスの現場タグと、実際に取れた明細を突き合わせ、サマリーが揃っているか判定する。
+    // 会計マトリクスの現場タグと、実際に取れた明細を突き合わせる。
+    //  ・その現場の当月データが取れている(=誰かの明細がある)のに本人の明細が無い → 「未稼働」(正常)
+    //  ・現場ごと取得できていない(エラー/未確定で0件)          → 「未取得」(サマリーを作らない)
     const mt=matrixTools(g);
     const got=new Set(g.items.map(it=>it.toolKey));
     g._expect=mt?[...mt.tools]:null;
-    g._missTools=mt?[...mt.tools].filter(t=>!got.has(t)):[];
-    g._missMembers=mt?mt.members.filter(m=>!g.items.some(it=>nmKeyV(it.name)===m.nk)).map(m=>m.name):[];
-    g._complete=!!mt&&g._missTools.length===0&&g._missMembers.length===0;
+    const lack=mt?[...mt.tools].filter(t=>!got.has(t)):[];
+    g._missTools=lack.filter(t=>toolStatus[t]!=='ok');   // 現場ごと取れていない=サマリー不可
+    g._idleTools=lack.filter(t=>toolStatus[t]==='ok');   // 当月は稼働なし
+    const memberMiss=mt?mt.members.filter(m=>!g.items.some(it=>nmKeyV(it.name)===m.nk)):[];
+    // 所属メンバーの欠落も同じ基準: 本人の現場がすべて取得できているなら「未稼働」とみなす
+    g._missMembers=memberMiss.filter(m=>[...m.tools].some(t=>toolStatus[t]!=='ok')).map(m=>m.name);
+    g._idleMembers=memberMiss.filter(m=>![...m.tools].some(t=>toolStatus[t]!=='ok')).map(m=>m.name);
+    g._blocked=g._missTools.length>0||g._missMembers.length>0; // サマリーを生成しない
   });
   const outTotal=groups.reduce((a,g)=>a+g.total,0);
   const taxTotal=groups.reduce((a,g)=>a+(g._zei||0),0);
@@ -1076,22 +1089,27 @@ function renderPayeeList(ym,groups,tools){
     const taxChip=g._hasTax?`<span style="background:#dcfce7;color:#15803d;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:4px;">適格</span>`:'';
     // サマリーが作れる状態か: マトリクスの稼働現場・所属メンバーの明細が全部そろっているか
     const lackChip=(g._missTools&&g._missTools.length)
-      ? `<span title="会計マトリクスではこの現場でも稼働していますが、明細が取得できていません" style="background:#fef3c7;color:#92400e;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:4px;">⚠ ${g._missTools.map(t=>TOOL_LABEL[t]||t).join('・')}の明細なし</span>`
+      ? `<span title="会計マトリクスではこの現場でも稼働していますが、当月の明細がツールから取得できていません(未確定/取得エラー)" style="background:#fee2e2;color:#b91c1c;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:4px;">⚠ ${g._missTools.map(t=>TOOL_LABEL[t]||t).join('・')}が未取得</span>`
       : '';
     const lackMem=(g._missMembers&&g._missMembers.length)
-      ? `<span title="${escHtml(g._missMembers.join('、'))}" style="background:#fef3c7;color:#92400e;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:4px;">⚠ 未取得 ${g._missMembers.length}名</span>`
+      ? `<span title="${escHtml(g._missMembers.join('、'))}" style="background:#fee2e2;color:#b91c1c;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:4px;">⚠ 未取得 ${g._missMembers.length}名</span>`
+      : '';
+    const idleChip=((g._idleTools&&g._idleTools.length)||(g._idleMembers&&g._idleMembers.length))
+      ? `<span title="${escHtml([...(g._idleTools||[]).map(t=>TOOL_LABEL[t]||t),...(g._idleMembers||[])].join('、'))}" style="background:#f1f5f9;color:#64748b;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:4px;">当月未稼働あり</span>`
       : '';
     const toolTags=g.items.map(it=>`<span style="color:${it.color};font-size:10px;font-weight:600;">${it.tool.replace('新聞シフト','新聞')}</span>`).join(' ・ ');
     html+=`<div style="padding:10px 14px;border-bottom:1px solid var(--border);">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
         <div style="min-width:0;">
-          <div style="font-weight:700;font-size:14px;">${escHtml(g.label||'(名称なし)')}${badge}${taxChip}${lackChip}${lackMem}</div>
+          <div style="font-weight:700;font-size:14px;">${escHtml(g.label||'(名称なし)')}${badge}${taxChip}${lackChip}${lackMem}${idleChip}</div>
           <div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${toolTags}${g.items.length>1?` ／ ${g.items.length}件`:''}${g._zei>0?` ／ 外注費 ${fmtYen(g.total)}＋税 ${fmtYen(g._zei)}`:''}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
           <div style="font-weight:800;font-size:15px;">${fmtYen(g.total+(g._zei||0))}</div>
           <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="togglePayeeGroup(${g._i})">📋 内訳</button>
-          <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="openPayeeGroup(${g._i})">→ 個別/PDF</button>
+          ${g._blocked
+            ? `<span style="font-size:11px;color:#b91c1c;" title="現場の明細が取得できていないため、サマリーを作成しません。ツール側の確定/公開を確認してください">サマリー作成不可</span>`
+            : `<button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="openPayeeGroup(${g._i})">→ 個別/PDF</button>`}
         </div>
       </div>
       <div id="pg-detail-${g._i}" style="display:none;margin-top:8px;"></div>
@@ -1161,6 +1179,7 @@ window.togglePayeeGroup=function(i){
 };
 window.openPayeeGroup=function(i){
   const g=(_allGroups||[]).find(x=>x._i===i); if(!g)return;
+  if(g._blocked){ alert('この取引先は現場の明細が取得できていないため、サマリーを作成しません。 未取得: '+[...(g._missTools||[]).map(t=>TOOL_LABEL[t]||t),...(g._missMembers||[])].join('、')); return; }
   if(g.kind==='company'){ $('admin-name-input').value=g.company||g.label; loadCompany(g.company||g.label); }
   else { $('admin-name-input').value=g.label||''; $('admin-phone-input').value=g.phone||''; loadFor(g.phone||'', g.label||'', null, true); }
   window.scrollTo({top:0,behavior:'smooth'});
