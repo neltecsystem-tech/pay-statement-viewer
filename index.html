@@ -955,30 +955,49 @@ async function fetchAllTools(ym){
 // 法人/屋号か個人かは「会計マトリクス(中央人材マスタ staff_master)」の会社名だけで決める。
 // 現場ツールの profiles.company_name には荷主名(アスクル等)が入っていることがあり、それで
 // グループを作ると存在しない法人ができてしまうため、ツール側の値はグループ判定に使わない。
-let staffMatrix=null; // 電話/氏名 → {company} (null=個人)
+// 現場タグ(matrix.tools)→ ビューアのツール区分。デリバリーは荷主別タグに分かれている。
+const TOOL_OF_TAG={shift:'shift',askul:'askul',delivery:'delivery',yamato:'delivery',sbs:'delivery',tosupo:'delivery'};
+let staffMatrix=null; // 電話/氏名 → {company, tools} (会社名が空=個人)
 async function loadStaffMatrix(){
   if(staffMatrix)return staffMatrix;
-  const byPhone=new Map(),byName=new Map();
+  const byPhone=new Map(),byName=new Map(),byCompany=new Map(),rows=[];
   try{
-    const {data}=await sb.from('staff_master').select('phone, full_name, company_name');
+    const {data}=await sb.from('staff_master').select('phone, full_name, company_name, tools, hidden');
     (data||[]).forEach(r=>{
+      if(r.hidden)return;
       const co=String(r.company_name||'').trim();
-      const ph=normalizePhone(r.phone||'');
-      if(ph)byPhone.set(ph,co);
-      const nk=nmKeyV(r.full_name||'');
-      if(nk&&!byName.has(nk))byName.set(nk,co);
+      const tools=new Set((r.tools||[]).map(t=>TOOL_OF_TAG[t]).filter(Boolean));
+      const rec={name:String(r.full_name||''),company:co,tools,ph:normalizePhone(r.phone||''),nk:nmKeyV(r.full_name||'')};
+      rows.push(rec);
+      if(rec.ph)byPhone.set(rec.ph,rec);
+      if(rec.nk&&!byName.has(rec.nk))byName.set(rec.nk,rec);
+      if(co){const k=normCo(co);byCompany.set(k,[...(byCompany.get(k)||[]),rec]);}
     });
   }catch(_){/* 取得できなければツール側の値にフォールバック */}
-  staffMatrix={byPhone,byName,ok:byPhone.size>0||byName.size>0};
+  staffMatrix={byPhone,byName,byCompany,rows,ok:rows.length>0};
   return staffMatrix;
 }
-function matrixCompany(name,phone,fallback){
-  if(!staffMatrix||!staffMatrix.ok)return fallback; // マスタ未取得時は従来動作
+function matrixRow(name,phone){
+  if(!staffMatrix||!staffMatrix.ok)return null;
   const ph=normalizePhone(phone||'');
   if(ph&&staffMatrix.byPhone.has(ph))return staffMatrix.byPhone.get(ph);
   const nk=nmKeyV(name||'');
-  if(nk&&staffMatrix.byName.has(nk))return staffMatrix.byName.get(nk);
-  return fallback; // マスタに載っていない人だけツール側の値を使う
+  return staffMatrix.byName.get(nk)||null;
+}
+// マトリクス上「どの現場で稼働しているか」。グループ(法人)は所属メンバー全員のタグを合算。
+function matrixTools(g){
+  if(!staffMatrix||!staffMatrix.ok)return null;
+  const members = g.kind==='company'
+    ? (staffMatrix.byCompany.get(normCo(g.label||g.company||''))||[])
+    : [matrixRow(g.label,g.phone)].filter(Boolean);
+  if(!members.length)return null;
+  const tools=new Set();
+  members.forEach(m=>m.tools.forEach(t=>tools.add(t)));
+  return {tools,members};
+}
+function matrixCompany(name,phone,fallback){
+  const r=matrixRow(name,phone);
+  return r?r.company:fallback; // マスタに載っていない人だけツール側の値を使う
 }
 function groupPayees(tools){
   const groups=new Map();
@@ -1027,6 +1046,13 @@ function renderPayeeList(ym,groups,tools){
     const hit=(invPartners||[]).find(p=>normCo(p.name)===normCo(g.label||g.company||'')&&_okM(p));
     g._hasTax=!!(hit&&(hit.registered!==false)&&hit.invoice_number);
     g._zei=g._hasTax?Math.round(g.total*0.1):0;
+    // 会計マトリクスの現場タグと、実際に取れた明細を突き合わせ、サマリーが揃っているか判定する。
+    const mt=matrixTools(g);
+    const got=new Set(g.items.map(it=>it.toolKey));
+    g._expect=mt?[...mt.tools]:null;
+    g._missTools=mt?[...mt.tools].filter(t=>!got.has(t)):[];
+    g._missMembers=mt?mt.members.filter(m=>!g.items.some(it=>nmKeyV(it.name)===m.nk)).map(m=>m.name):[];
+    g._complete=!!mt&&g._missTools.length===0&&g._missMembers.length===0;
   });
   const outTotal=groups.reduce((a,g)=>a+g.total,0);
   const taxTotal=groups.reduce((a,g)=>a+(g._zei||0),0);
@@ -1048,11 +1074,18 @@ function renderPayeeList(ym,groups,tools){
       ? `<span style="background:#dbeafe;color:#1e40af;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:6px;">法人/屋号</span>`
       : `<span style="background:#dcfce7;color:#15803d;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:6px;">個人</span>`;
     const taxChip=g._hasTax?`<span style="background:#dcfce7;color:#15803d;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:4px;">適格</span>`:'';
+    // サマリーが作れる状態か: マトリクスの稼働現場・所属メンバーの明細が全部そろっているか
+    const lackChip=(g._missTools&&g._missTools.length)
+      ? `<span title="会計マトリクスではこの現場でも稼働していますが、明細が取得できていません" style="background:#fef3c7;color:#92400e;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:4px;">⚠ ${g._missTools.map(t=>TOOL_LABEL[t]||t).join('・')}の明細なし</span>`
+      : '';
+    const lackMem=(g._missMembers&&g._missMembers.length)
+      ? `<span title="${escHtml(g._missMembers.join('、'))}" style="background:#fef3c7;color:#92400e;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:4px;">⚠ 未取得 ${g._missMembers.length}名</span>`
+      : '';
     const toolTags=g.items.map(it=>`<span style="color:${it.color};font-size:10px;font-weight:600;">${it.tool.replace('新聞シフト','新聞')}</span>`).join(' ・ ');
     html+=`<div style="padding:10px 14px;border-bottom:1px solid var(--border);">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
         <div style="min-width:0;">
-          <div style="font-weight:700;font-size:14px;">${escHtml(g.label||'(名称なし)')}${badge}${taxChip}</div>
+          <div style="font-weight:700;font-size:14px;">${escHtml(g.label||'(名称なし)')}${badge}${taxChip}${lackChip}${lackMem}</div>
           <div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${toolTags}${g.items.length>1?` ／ ${g.items.length}件`:''}${g._zei>0?` ／ 外注費 ${fmtYen(g.total)}＋税 ${fmtYen(g._zei)}`:''}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
