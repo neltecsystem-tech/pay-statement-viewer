@@ -1089,22 +1089,81 @@ function renderPayeeList(ym,groups,tools){
     g._idleMembers=memberMiss.map(m=>m.name);
     g._blocked=g._missTools.length>0; // 稼働している現場が未確定の時だけサマリーを作らない
   });
-  const outTotal=groups.reduce((a,g)=>a+g.total,0);
-  const taxTotal=groups.reduce((a,g)=>a+(g._zei||0),0);
+  _payeeCtx={ym,tools};
+  renderPayeeView();
+}
+
+// ── 取引先一覧の表示（現場フィルタ + 並び替え）──
+//   現場 = 新聞 / アスクル / デリバリー。現場を選ぶと、その現場の支払額だけを集計して表示する。
+let _payeeCtx=null, _payeeSite='all', _payeeSort='amount';
+const SITE_ORDER=['shift','askul','delivery'];
+function setPayeeSite(s){ _payeeSite=s; renderPayeeView(); }
+function setPayeeSort(s){ _payeeSort=s; renderPayeeView(); }
+// その取引先の「主な現場」= 表示対象の中で金額が最大の現場
+function primarySite(g,items){ let best='',mx=-1; (items||[]).forEach(it=>{ if(it.amount>mx){mx=it.amount;best=it.toolKey;} }); return best; }
+// 営業所(新聞の primary_area)。新聞以外は空。
+function payeeArea(items){ const a=(items||[]).map(it=>it.sub).filter(Boolean); return a.length?a.join('・'):''; }
+function renderPayeeView(){
+  if(!_payeeCtx)return;
+  const {ym,tools}=_payeeCtx;
+  const groups=_allGroups;
+  const site=_payeeSite;
+  // 現場フィルタ: 選択した現場の明細を持つ取引先のみ。金額もその現場分だけで集計する。
+  const view=groups.map(g=>{
+    const items=site==='all'?g.items:g.items.filter(it=>it.toolKey===site);
+    if(!items.length)return null;
+    const total=items.reduce((a,it)=>a+it.amount,0);
+    return {g,items,total,zei:g._hasTax?Math.round(total*0.1):0};
+  }).filter(Boolean);
+  if(_payeeSort==='name'){
+    view.sort((a,b)=>String(a.g.label||'').localeCompare(String(b.g.label||''),'ja'));
+  }else if(_payeeSort==='site'){
+    view.sort((a,b)=>{
+      const ia=SITE_ORDER.indexOf(primarySite(a.g,a.items)), ib=SITE_ORDER.indexOf(primarySite(b.g,b.items));
+      if(ia!==ib)return (ia<0?99:ia)-(ib<0?99:ib);
+      return b.total-a.total;
+    });
+  }else if(_payeeSort==='area'){
+    view.sort((a,b)=>{
+      const aa=payeeArea(a.items), ab=payeeArea(b.items);
+      if(!!aa!==!!ab)return aa?-1:1;              // 営業所なし(新聞以外)は後ろ
+      if(aa!==ab)return aa.localeCompare(ab,'ja');
+      return b.total-a.total;
+    });
+  }else{
+    view.sort((a,b)=>b.total-a.total);
+  }
+  const outTotal=view.reduce((a,v)=>a+v.total,0);
+  const taxTotal=view.reduce((a,v)=>a+v.zei,0);
   const grand=outTotal+taxTotal;
   const errs=[['新聞',tools.shift],['アスクル',tools.askul],['デリバリー',tools.delivery]].filter(([_,t])=>t&&t.error).map(([n])=>n);
-  const nCorp=groups.filter(g=>g.kind==='company').length, nPer=groups.length-nCorp;
+  const nCorp=view.filter(v=>v.g.kind==='company').length, nPer=view.length-nCorp;
+  const siteLabel={all:'3ツール横断',shift:'🗞 新聞',askul:'📦 アスクル',delivery:'🚚 デリバリー'}[site];
   let html=`<div class="grand-total-card">
-    <div class="label">📋 ${escHtml(ym)} 取引先一覧 合計支払額（3ツール横断）</div>
+    <div class="label">📋 ${escHtml(ym)} 取引先一覧 合計支払額（${siteLabel}）</div>
     <div class="value">${fmtYen(grand)}</div>
-    <div style="font-size:11px;color:#92400e;margin-top:6px;">取引先 ${groups.length}件（法人/屋号 ${nCorp}・個人 ${nPer}） ／ 外注費 ${fmtYen(outTotal)}${taxTotal>0?` ＋消費税 ${fmtYen(taxTotal)}`:''}${errs.length?` ／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
+    <div style="font-size:11px;color:#92400e;margin-top:6px;">取引先 ${view.length}件（法人/屋号 ${nCorp}・個人 ${nPer}） ／ 外注費 ${fmtYen(outTotal)}${taxTotal>0?` ＋消費税 ${fmtYen(taxTotal)}`:''}${errs.length?` ／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
+  </div>`;
+  // 現場フィルタ + 並び替え
+  const sbtn=(k,label)=>`<button class="btn" onclick="setPayeeSite('${k}')" style="font-size:12px;padding:5px 12px;${_payeeSite===k?'background:#6366f1;color:#fff;':'background:#f1f5f9;color:#475569;'}">${label}</button>`;
+  const obtn=(k,label)=>`<button class="btn" onclick="setPayeeSort('${k}')" style="font-size:12px;padding:5px 12px;${_payeeSort===k?'background:#0ea5e9;color:#fff;':'background:#f1f5f9;color:#475569;'}">${label}</button>`;
+  html+=`<div class="card" style="padding:10px 12px;margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--text-sub);font-weight:600;">現場</span>
+      ${sbtn('all','すべて')}${sbtn('shift','🗞 新聞')}${sbtn('askul','📦 アスクル')}${sbtn('delivery','🚚 デリバリー')}
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--text-sub);font-weight:600;">並び順</span>
+      ${obtn('amount','金額の多い順')}${obtn('site','現場順')}${obtn('area','営業所順')}${obtn('name','名前順')}
+    </div>
   </div>
   <div style="margin-bottom:12px;text-align:right;">
     <button class="btn" style="background:#f59e0b;color:#fff;" onclick="refinalizeMonth()" title="確定後にツール側(法人名・単価・稼働など)を修正した場合、確定済みツールを最新の元データで再確定し、ビューア/PDFへ反映します">🔄 変更を反映（再確定）</button>
   </div>`;
-  if(!groups.length){ html+=`<div class="card" style="line-height:1.8;">該当する明細がありません。<br><span style="font-size:12px;color:var(--text-sub);">対象月(${escHtml(ym)})が各ツールで確定・公開済みかご確認ください。</span></div>`; $('result-area').innerHTML=html; return; }
+  if(!view.length){ html+=`<div class="card" style="line-height:1.8;">該当する明細がありません。<br><span style="font-size:12px;color:var(--text-sub);">${site==='all'?`対象月(${escHtml(ym)})が各ツールで確定・公開済みかご確認ください。`:'この現場の当月の明細がありません。「すべて」に戻すと他の現場を表示します。'}</span></div>`; $('result-area').innerHTML=html; return; }
   html+=`<div class="card" style="padding:0;overflow:hidden;">`;
-  groups.forEach(g=>{
+  view.forEach(v=>{
+    const g=v.g;
     const badge = g.kind==='company'
       ? `<span style="background:#dbeafe;color:#1e40af;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:6px;">法人/屋号</span>`
       : `<span style="background:#dcfce7;color:#15803d;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:6px;">個人</span>`;
@@ -1119,15 +1178,17 @@ function renderPayeeList(ym,groups,tools){
     const idleChip=((g._idleTools&&g._idleTools.length)||(g._idleMembers&&g._idleMembers.length))
       ? `<span title="${escHtml([...(g._idleTools||[]).map(t=>TOOL_LABEL[t]||t),...(g._idleMembers||[])].join('、'))}" style="background:#f1f5f9;color:#64748b;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:4px;">当月未稼働あり</span>`
       : '';
-    const toolTags=g.items.map(it=>`<span style="color:${it.color};font-size:10px;font-weight:600;">${it.tool.replace('新聞シフト','新聞')}</span>`).join(' ・ ');
+    const toolTags=v.items.map(it=>`<span style="color:${it.color};font-size:10px;font-weight:600;">${it.tool.replace('新聞シフト','新聞')}${it.sub?`(${escHtml(it.sub)})`:''}</span>`).join(' ・ ');
+    const siteNote=_payeeSite!=='all'&&g.items.length>v.items.length
+      ? `<span style="font-size:10px;color:var(--text-sub);margin-left:4px;">※他の現場 ${g.items.length-v.items.length}件は非表示</span>`:'';
     html+=`<div style="padding:10px 14px;border-bottom:1px solid var(--border);">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
         <div style="min-width:0;">
           <div style="font-weight:700;font-size:14px;">${escHtml(g.label||'(名称なし)')}${badge}${taxChip}${lackChip}${lackMem}${idleChip}</div>
-          <div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${toolTags}${g.items.length>1?` ／ ${g.items.length}件`:''}${g._zei>0?` ／ 外注費 ${fmtYen(g.total)}＋税 ${fmtYen(g._zei)}`:''}</div>
+          <div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${toolTags}${v.items.length>1?` ／ ${v.items.length}件`:''}${v.zei>0?` ／ 外注費 ${fmtYen(v.total)}＋税 ${fmtYen(v.zei)}`:''}${siteNote}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <div style="font-weight:800;font-size:15px;">${fmtYen(g.total+(g._zei||0))}</div>
+          <div style="font-weight:800;font-size:15px;">${fmtYen(v.total+v.zei)}</div>
           <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="togglePayeeGroup(${g._i})">📋 内訳</button>
           ${g._blocked
             ? `<span style="font-size:11px;color:#b91c1c;" title="現場の明細が取得できていないため、サマリーを作成しません。ツール側の確定/公開を確認してください">サマリー作成不可</span>`
