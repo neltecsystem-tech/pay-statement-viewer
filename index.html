@@ -952,9 +952,38 @@ async function fetchAllTools(ym){
 }
 
 // 全ツールの明細を取引先単位にグルーピング
+// 法人/屋号か個人かは「会計マトリクス(中央人材マスタ staff_master)」の会社名だけで決める。
+// 現場ツールの profiles.company_name には荷主名(アスクル等)が入っていることがあり、それで
+// グループを作ると存在しない法人ができてしまうため、ツール側の値はグループ判定に使わない。
+let staffMatrix=null; // 電話/氏名 → {company} (null=個人)
+async function loadStaffMatrix(){
+  if(staffMatrix)return staffMatrix;
+  const byPhone=new Map(),byName=new Map();
+  try{
+    const {data}=await sb.from('staff_master').select('phone, full_name, company_name');
+    (data||[]).forEach(r=>{
+      const co=String(r.company_name||'').trim();
+      const ph=normalizePhone(r.phone||'');
+      if(ph)byPhone.set(ph,co);
+      const nk=nmKeyV(r.full_name||'');
+      if(nk&&!byName.has(nk))byName.set(nk,co);
+    });
+  }catch(_){/* 取得できなければツール側の値にフォールバック */}
+  staffMatrix={byPhone,byName,ok:byPhone.size>0||byName.size>0};
+  return staffMatrix;
+}
+function matrixCompany(name,phone,fallback){
+  if(!staffMatrix||!staffMatrix.ok)return fallback; // マスタ未取得時は従来動作
+  const ph=normalizePhone(phone||'');
+  if(ph&&staffMatrix.byPhone.has(ph))return staffMatrix.byPhone.get(ph);
+  const nk=nmKeyV(name||'');
+  if(nk&&staffMatrix.byName.has(nk))return staffMatrix.byName.get(nk);
+  return fallback; // マスタに載っていない人だけツール側の値を使う
+}
 function groupPayees(tools){
   const groups=new Map();
-  const add=(toolKey,tool,color,st,name,company,phone,amount,sub)=>{
+  const add=(toolKey,tool,color,st,name,companyRaw,phone,amount,sub)=>{
+    const company=matrixCompany(name,phone,companyRaw);
     const hasCo = company && String(company).trim();
     let key,kind,label;
     if(hasCo){ key='C:'+nmKeyV(company); kind='company'; label=String(company).trim(); }
@@ -980,7 +1009,7 @@ async function loadAllPayees(){
   area.innerHTML=`<div class="card center"><div class="spinner"></div> ${escHtml(ym)} の取引先一覧を集計中（新聞・アスクル・デリバリー横断）...</div>`;
   $('btn-summary-pdf').disabled=true; $('btn-all-pdf').disabled=true; currentData=null;
   try{
-    const [tools]=await Promise.all([fetchAllTools(ym),loadAccDeductions(ym)]);
+    const [tools]=await Promise.all([fetchAllTools(ym),loadAccDeductions(ym),loadStaffMatrix()]);
     const authErr=[['新聞',tools.shift],['アスクル',tools.askul],['デリバリー',tools.delivery]].filter(([_,t])=>t&&t.code===403);
     if(authErr.length===3){ area.innerHTML=`<div class="card" style="color:var(--danger);">取引先一覧は管理者のみ利用できます。</div>`; return; }
     window._lastTools=tools; // 再確定ボタン用(確定済みツール判定)
@@ -1494,6 +1523,7 @@ function renderShiftCard(r,ym){
         ${hide?hideMsg():`
         <div class="summary-row"><span class="summary-label">朝刊合計</span><span class="summary-value">${fmtYen(s.am_sum)}</span></div>
         <div class="summary-row"><span class="summary-label">夕刊合計</span><span class="summary-value">${fmtYen(s.pm_sum)}</span></div>
+        ${Number(s.planner_allowance)?`<div class="summary-row"><span class="summary-label">🧭 プランナー手当</span><span class="summary-value">${fmtYen(s.planner_allowance)}</span></div>`:''}
         <div class="amount-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:8px;"><span class="label">月合計</span><span class="amount-big">${fmtYen(s.grand_total)}</span></div>
         `}
         <div class="muted" style="margin-top:6px;">確定 ${finalized}${modified}</div>
@@ -2077,6 +2107,12 @@ function buildShiftDetailHtml(){
       <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;font-weight:600;">${fmtYen(r.total||0)}</td>
     </tr>`;
   });
+  if(Number(s.planner_allowance)){
+    h+=`<tr style="background:#f0fdfa;font-weight:600;">
+      <td colspan="6" style="border:1px solid #94a3b8;padding:5px;color:#0f766e;">🧭 プランナー手当 (月額)</td>
+      <td style="border:1px solid #94a3b8;padding:5px;text-align:right;color:#0f766e;">${fmtYen(s.planner_allowance)}</td>
+    </tr>`;
+  }
   h+=`<tr style="background:#f1f5f9;font-weight:700;">
     <td colspan="3" style="border:1px solid #94a3b8;padding:5px;text-align:center;">合計</td>
     <td style="border:1px solid #94a3b8;padding:5px;text-align:right;">${fmtYen(s.am_sum||0)}</td>
