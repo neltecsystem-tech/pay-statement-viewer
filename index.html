@@ -1101,6 +1101,28 @@ function setPayeeSite(s){ _payeeSite=s; renderPayeeView(); }
 function setPayeeSort(s){ _payeeSort=s; renderPayeeView(); }
 // その取引先の「主な現場」= 表示対象の中で金額が最大の現場
 function primarySite(g,items){ let best='',mx=-1; (items||[]).forEach(it=>{ if(it.amount>mx){mx=it.amount;best=it.toolKey;} }); return best; }
+// 取引先の控除項目(会計マスタ連携)。法人=会社名の部分一致、無ければ支払先(氏名)ごと。
+//   renderCompanyAgg / buildSummaryHtml と同じ拾い方にして、通知書と金額をズラさない。
+function payeeDedItems(g,ym){
+  if(g.kind==='company'){
+    let {items}=accCompanyDeduction(g.label||g.company||'',ym);
+    if(!items.length)items=accPayeesDedItems(g.items.map(it=>({name:it.name})),ym);
+    return items.map(d=>({label:d.name,amount:d.amount}));
+  }
+  return accDedItems(g.label,ym).map(d=>({label:d.label,amount:d.amount}));
+}
+// 支払通知書と同一式の「お支払額」:
+//   外注費(税抜)=ツール合計 / 計算手数料・車両リース料は課税前に控除 /
+//   消費税=(外注費−計算手数料−リース)×10%(適格のみ) / お支払額=課税後 −その他控除(立替金・貸付金返済など)
+function payeePayAmount(total,hasTax,dedItems){
+  const sum=a=>a.reduce((x,d)=>x+(Number(d.amount)||0),0);
+  const calcFee=sum(dedItems.filter(d=>/計算手数料/.test(d.label||'')));
+  const lease=sum(dedItems.filter(d=>/リース/.test(d.label||'')));
+  const other=sum(dedItems.filter(d=>!/計算手数料|リース/.test(d.label||'')));
+  const taxBase=total-calcFee-lease;
+  const zei=hasTax?Math.round(taxBase*0.1):0;
+  return {zei,ded:calcFee+lease+other,pay:taxBase+zei-other};
+}
 // 営業所(新聞の primary_area)。新聞以外は空。
 function payeeArea(items){ const a=(items||[]).map(it=>it.sub).filter(Boolean); return a.length?a.join('・'):''; }
 function renderPayeeView(){
@@ -1113,7 +1135,11 @@ function renderPayeeView(){
     const items=site==='all'?g.items:g.items.filter(it=>it.toolKey===site);
     if(!items.length)return null;
     const total=items.reduce((a,it)=>a+it.amount,0);
-    return {g,items,total,zei:g._hasTax?Math.round(total*0.1):0};
+    // 控除(車両リース/立替金/貸付金返済など)は取引先まるごとに掛かるため、
+    // 現場で絞り込んでいる時は控除を当てず「その現場の外注費+税」を表示する。
+    const dedItems=site==='all'?payeeDedItems(g,ym):[];
+    const {zei,ded,pay}=payeePayAmount(total,!!g._hasTax,dedItems);
+    return {g,items,total,zei,ded,pay,dedItems};
   }).filter(Boolean);
   if(_payeeSort==='name'){
     view.sort((a,b)=>String(a.g.label||'').localeCompare(String(b.g.label||''),'ja'));
@@ -1121,28 +1147,30 @@ function renderPayeeView(){
     view.sort((a,b)=>{
       const ia=SITE_ORDER.indexOf(primarySite(a.g,a.items)), ib=SITE_ORDER.indexOf(primarySite(b.g,b.items));
       if(ia!==ib)return (ia<0?99:ia)-(ib<0?99:ib);
-      return b.total-a.total;
+      return b.pay-a.pay;
     });
   }else if(_payeeSort==='area'){
     view.sort((a,b)=>{
       const aa=payeeArea(a.items), ab=payeeArea(b.items);
       if(!!aa!==!!ab)return aa?-1:1;              // 営業所なし(新聞以外)は後ろ
       if(aa!==ab)return aa.localeCompare(ab,'ja');
-      return b.total-a.total;
+      return b.pay-a.pay;
     });
   }else{
-    view.sort((a,b)=>b.total-a.total);
+    view.sort((a,b)=>b.pay-a.pay);
   }
   const outTotal=view.reduce((a,v)=>a+v.total,0);
   const taxTotal=view.reduce((a,v)=>a+v.zei,0);
-  const grand=outTotal+taxTotal;
+  const dedTotalAll=view.reduce((a,v)=>a+(v.ded||0),0);
+  const grand=view.reduce((a,v)=>a+v.pay,0);
   const errs=[['新聞',tools.shift],['アスクル',tools.askul],['デリバリー',tools.delivery]].filter(([_,t])=>t&&t.error).map(([n])=>n);
   const nCorp=view.filter(v=>v.g.kind==='company').length, nPer=view.length-nCorp;
   const siteLabel={all:'3ツール横断',shift:'🗞 新聞',askul:'📦 アスクル',delivery:'🚚 デリバリー'}[site];
   let html=`<div class="grand-total-card">
-    <div class="label">📋 ${escHtml(ym)} 取引先一覧 合計支払額（${siteLabel}）</div>
+    <div class="label">📋 ${escHtml(ym)} 取引先一覧 ${site==='all'?'お支払額 合計':'外注費 合計'}（${siteLabel}）</div>
     <div class="value">${fmtYen(grand)}</div>
-    <div style="font-size:11px;color:#92400e;margin-top:6px;">取引先 ${view.length}件（法人/屋号 ${nCorp}・個人 ${nPer}） ／ 外注費 ${fmtYen(outTotal)}${taxTotal>0?` ＋消費税 ${fmtYen(taxTotal)}`:''}${errs.length?` ／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
+    <div style="font-size:11px;color:#92400e;margin-top:6px;">取引先 ${view.length}件（法人/屋号 ${nCorp}・個人 ${nPer}） ／ 外注費 ${fmtYen(outTotal)}${taxTotal>0?` ＋消費税 ${fmtYen(taxTotal)}`:''}${dedTotalAll>0?` − 控除 ${fmtYen(dedTotalAll)}`:''}${errs.length?` ／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
+    ${site!=='all'?`<div style="font-size:11px;color:#92400e;margin-top:4px;">※現場で絞り込み中は控除（車両リース料・立替金など）を差し引く前の金額です（控除は取引先ごとに掛かるため）。</div>`:''}
   </div>`;
   // 現場フィルタ + 並び替え
   const sbtn=(k,label)=>`<button class="btn" onclick="setPayeeSite('${k}')" style="font-size:12px;padding:5px 12px;${_payeeSite===k?'background:#6366f1;color:#fff;':'background:#f1f5f9;color:#475569;'}">${label}</button>`;
@@ -1185,10 +1213,13 @@ function renderPayeeView(){
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
         <div style="min-width:0;">
           <div style="font-weight:700;font-size:14px;">${escHtml(g.label||'(名称なし)')}${badge}${taxChip}${lackChip}${lackMem}${idleChip}</div>
-          <div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${toolTags}${v.items.length>1?` ／ ${v.items.length}件`:''}${v.zei>0?` ／ 外注費 ${fmtYen(v.total)}＋税 ${fmtYen(v.zei)}`:''}${siteNote}</div>
+          <div style="font-size:11px;color:var(--text-sub);margin-top:2px;">${toolTags}${v.items.length>1?` ／ ${v.items.length}件`:''}${(v.zei>0||v.ded>0)?` ／ 外注費 ${fmtYen(v.total)}${v.zei>0?`＋税 ${fmtYen(v.zei)}`:''}${v.ded>0?`−控除 ${fmtYen(v.ded)}`:''}`:''}${siteNote}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <div style="font-weight:800;font-size:15px;">${fmtYen(v.total+v.zei)}</div>
+          <div style="text-align:right;">
+            <div style="font-weight:800;font-size:15px;">${fmtYen(v.pay)}</div>
+            ${v.ded>0?`<div style="font-size:10px;color:#b45309;">控除後のお支払額</div>`:''}
+          </div>
           <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="togglePayeeGroup(${g._i})">📋 内訳</button>
           ${g._blocked
             ? `<span style="font-size:11px;color:#b91c1c;" title="現場の明細が取得できていないため、サマリーを作成しません。ツール側の確定/公開を確認してください">サマリー作成不可</span>`
@@ -1255,6 +1286,18 @@ window.togglePayeeGroup=function(i){
       g.items.forEach(it=>{ h+=`<div style="border:1px solid var(--border);border-radius:6px;margin-bottom:6px;overflow:hidden;">
         <div style="display:flex;justify-content:space-between;padding:6px 10px;background:#f8fafc;font-size:12px;"><span style="color:${it.color};font-weight:700;">${escHtml(it.tool)}${it.sub?` <span style="color:var(--text-sub);font-weight:400;">${escHtml(it.sub)}</span>`:''}${g.kind==='company'&&it.name?` <span style="color:var(--text-sub);font-weight:400;">/ ${escHtml(it.name)}</span>`:''}</span><span style="font-weight:700;">${fmtYen(it.amount)}</span></div>
         <div style="padding:6px 10px;overflow-x:auto;">${_payeeDetailFor(it)}</div></div>`; });
+      // 支払通知書と同じ金額内訳(外注費→控除→消費税→お支払額)。一覧の金額が何で出来ているかを追えるように。
+      const ym=(_payeeCtx&&_payeeCtx.ym)||$('ym-input').value;
+      const dedItems=payeeDedItems(g,ym);
+      const {zei,pay}=payeePayAmount(g.total,!!g._hasTax,dedItems);
+      const row=(l,v,minus)=>`<div style="display:flex;justify-content:space-between;padding:3px 0;${minus?'color:#b91c1c;':''}"><span>${escHtml(l)}</span><span style="font-weight:600;">${minus?'▲':''}${fmtYen(v)}</span></div>`;
+      h+=`<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:6px;padding:8px 12px;font-size:12px;">
+        ${row('外注費（税抜）',g.total)}
+        ${dedItems.filter(d=>/計算手数料|リース/.test(d.label||'')).map(d=>row(d.label,d.amount,true)).join('')}
+        ${zei>0?row('消費税（10%）',zei):''}
+        ${dedItems.filter(d=>!/計算手数料|リース/.test(d.label||'')).map(d=>row(d.label,d.amount,true)).join('')}
+        <div style="display:flex;justify-content:space-between;border-top:2px solid #92400e;margin-top:5px;padding-top:5px;font-weight:800;color:#92400e;"><span>お支払額</span><span>${fmtYen(pay)}</span></div>
+      </div>`;
       box.innerHTML=h; box.dataset.loaded='1';
     }
     box.style.display='block';
