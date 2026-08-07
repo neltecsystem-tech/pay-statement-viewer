@@ -1168,6 +1168,8 @@ function shiftAreas(){
   return [...known,...rest];
 }
 function itemInArea(it,area){ return area==='all'||(it.toolKey==='shift'&&String(it.sub||'').split(/[・,、]/).map(s=>s.trim()).includes(area)); }
+// 営業所の絞り込みは新聞(現場=新聞)のときだけ効かせる
+function itemInArea2(it,area,site){ return (site!=='shift'||area==='all')?true:itemInArea(it,area); }
 function setPayeeArea(a){ _payeeArea=a; renderPayeeView(); }
 function setPayeeSite(s){ _payeeSite=s; if(s!=='shift')_payeeArea='all'; renderPayeeView(); }
 function setPayeeSort(s){ _payeeSort=s; renderPayeeView(); }
@@ -1204,16 +1206,15 @@ function renderPayeeView(){
   const site=_payeeSite;
   // 現場フィルタ: 選択した現場の明細を持つ取引先のみ。金額もその現場分だけで集計する。
   const area=(site==='shift')?_payeeArea:'all';
+  // 現場(・営業所)は「誰を出すか」の絞り込み。ヒットした取引先は、他の現場の分も含めた
+  // お支払額(＝支払通知書と同じ金額)をそのまま表示する。例: アスクルで絞っても、その業者の新聞分も入る。
   const view=groups.map(g=>{
-    let items=site==='all'?g.items:g.items.filter(it=>it.toolKey===site);
-    if(area!=='all')items=items.filter(it=>itemInArea(it,area)); // 新聞: 営業所(城北/川越/立川/川崎高津)で絞り込み
-    if(!items.length)return null;
-    const total=items.reduce((a,it)=>a+it.amount,0);
-    // 控除(車両リース/立替金/貸付金返済など)は取引先まるごとに掛かるため、
-    // 現場で絞り込んでいる時は控除を当てず「その現場の外注費+税」を表示する。
-      const dedItems=(site==='all')?payeeDedItems(g,ym):[];
+    const hit=g.items.filter(it=>(site==='all'||it.toolKey===site)&&itemInArea2(it,area,site));
+    if(!hit.length)return null;
+    const items=g.items, total=g.total;
+    const dedItems=payeeDedItems(g,ym);
     const {zei,ded,pay}=payeePayAmount(total,!!g._hasTax,dedItems);
-    return {g,items,total,zei,ded,pay,dedItems};
+    return {g,items,hit,total,zei,ded,pay,dedItems};
   }).filter(Boolean);
   if(_payeeSort==='name'){
     view.sort((a,b)=>String(a.g.label||'').localeCompare(String(b.g.label||''),'ja'));
@@ -1241,10 +1242,10 @@ function renderPayeeView(){
   const nCorp=view.filter(v=>v.g.kind==='company').length, nPer=view.length-nCorp;
   const siteLabel=({all:'3ツール横断',shift:'🗞 新聞',askul:'📦 アスクル',delivery:'🚚 デリバリー'}[site])+(area!=='all'?` / ${area}`:'');
   let html=`<div class="grand-total-card">
-    <div class="label">📋 ${escHtml(ym)} 取引先一覧 ${site==='all'?'お支払額 合計':'外注費 合計'}（${siteLabel}）</div>
+    <div class="label">📋 ${escHtml(ym)} 取引先一覧 お支払額 合計（${siteLabel}）</div>
     <div class="value">${fmtYen(grand)}</div>
     <div style="font-size:11px;color:#92400e;margin-top:6px;">取引先 ${view.length}件（法人/屋号 ${nCorp}・個人 ${nPer}） ／ 外注費 ${fmtYen(outTotal)}${taxTotal>0?` ＋消費税 ${fmtYen(taxTotal)}`:''}${dedTotalAll>0?` − 控除 ${fmtYen(dedTotalAll)}`:''}${errs.length?` ／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
-    ${site!=='all'?`<div style="font-size:11px;color:#92400e;margin-top:4px;">※現場で絞り込み中は控除（車両リース料・立替金など）を差し引く前の金額です（控除は取引先ごとに掛かるため）。</div>`:''}
+    ${site!=='all'?`<div style="font-size:11px;color:#92400e;margin-top:4px;">※${siteLabel} で稼働している取引先を抽出しています。金額は他の現場の分も含めた<b>お支払額の全額</b>です。</div>`:''}
   </div>`;
   // 現場フィルタ + 並び替え
   const sbtn=(k,label)=>`<button class="btn" onclick="setPayeeSite('${k}')" style="font-size:12px;padding:5px 12px;${_payeeSite===k?'background:#6366f1;color:#fff;':'background:#f1f5f9;color:#475569;'}">${label}</button>`;
@@ -1285,9 +1286,11 @@ function renderPayeeView(){
     const idleChip=((g._idleTools&&g._idleTools.length)||(g._idleMembers&&g._idleMembers.length))
       ? `<span title="${escHtml([...(g._idleTools||[]).map(t=>TOOL_LABEL[t]||t),...(g._idleMembers||[])].join('、'))}" style="background:#f1f5f9;color:#64748b;padding:1px 7px;border-radius:8px;font-size:10px;margin-left:4px;">当月未稼働あり</span>`
       : '';
-    const toolTags=v.items.map(it=>`<span style="color:${it.color};font-size:10px;font-weight:600;">${it.tool.replace('新聞シフト','新聞')}${it.sub?`(${escHtml(it.sub)})`:''}</span>`).join(' ・ ');
-    const siteNote=_payeeSite!=='all'&&g.items.length>v.items.length
-      ? `<span style="font-size:10px;color:var(--text-sub);margin-left:4px;">※他の現場 ${g.items.length-v.items.length}件は非表示</span>`:'';
+    const toolTags=v.items.map(it=>{
+      const on=v.hit.includes(it); // 絞り込みに一致した現場は強調(他現場も金額には含まれる)
+      return `<span style="color:${it.color};font-size:10px;font-weight:${on?'800':'500'};${on&&_payeeSite!=='all'?'text-decoration:underline;':''}${!on&&_payeeSite!=='all'?'opacity:.65;':''}">${it.tool.replace('新聞シフト','新聞')}${it.sub?`(${escHtml(it.sub)})`:''}</span>`;
+    }).join(' ・ ');
+    const siteNote='';
     html+=`<div style="padding:10px 14px;border-bottom:1px solid var(--border);">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
         <div style="min-width:0;">
