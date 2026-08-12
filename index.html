@@ -1988,11 +1988,11 @@ function renderDeliveryDetail(rows,kind){
       }).join('')}</tbody>
     </table>`;
   }
-  // ネコポスは配完+持戻の合算(同単価)。合算だけだと受け取った側が検算できないので
-  // 「ネコポス」と「うち持戻」を並べる。ヤマト以外(集荷/個口運用)では0のため列は出さない。
-  const hasNeko=rows.some(r=>Number(r.nekopos_count||0)>0||Number(r.nekopos_return||0)>0);
+  // ネコポス冊数(配完+持戻の合算)。支払は合算単価なので明細は合算のまま出す。
+  // ヤマト以外(集荷/個口運用)では0のため列を出さない。
+  const hasNeko=rows.some(r=>Number(r.nekopos_count||0)>0);
   return `<table class="detail">
-    <thead><tr><th>日付</th><th>曜日</th><th>配達</th>${hasNeko?'<th>ネコポス</th><th>うち持戻</th>':''}<th>集荷</th><th>個口</th><th>売上</th><th>手当</th></tr></thead>
+    <thead><tr><th>日付</th><th>曜日</th><th>配達</th>${hasNeko?'<th>ネコポス</th>':''}<th>集荷</th><th>個口</th><th>売上</th><th>手当</th></tr></thead>
     <tbody>${rows.map(r=>{
       const d=new Date(r.date);
       const dn=d.getDay();
@@ -2001,7 +2001,7 @@ function renderDeliveryDetail(rows,kind){
         <td>${escHtml(r.date||'')}</td>
         <td class="center">${dow[dn]||''}</td>
         <td class="right">${r.delivery_count||''}</td>
-        ${hasNeko?`<td class="right">${r.nekopos_count||''}</td><td class="right" style="color:#7c3aed;">${r.nekopos_return||''}</td>`:''}
+        ${hasNeko?`<td class="right">${r.nekopos_count||''}</td>`:''}
         <td class="right">${r.pickup_count||''}</td>
         <td class="right">${r.package_count||''}</td>
         <td class="right">${r.revenue?fmtYen(r.revenue):''}</td>
@@ -2526,9 +2526,9 @@ function buildDeliveryDetailHtml(){
       <th style="border:1px solid #94a3b8;padding:5px;">売上</th>
       <th style="border:1px solid #94a3b8;padding:5px;">手当</th>`}
     </tr></thead><tbody>`;
-  // ネコポス(配完+持戻)の内訳。実績のある明細だけ列を出す。
-  const hasNekoPdf=!tsPdf&&(s.daily_rows||[]).some(r=>Number(r.nekopos_count||0)>0||Number(r.nekopos_return||0)>0);
-  if(hasNekoPdf)h=h.replace('<th style="border:1px solid #94a3b8;padding:5px;">集荷</th>','<th style="border:1px solid #94a3b8;padding:5px;">ネコポス</th><th style="border:1px solid #94a3b8;padding:5px;">うち持戻</th><th style="border:1px solid #94a3b8;padding:5px;">集荷</th>');
+  // ネコポス冊数(配完+持戻の合算)。実績のある明細だけ列を出す。
+  const hasNekoPdf=!tsPdf&&(s.daily_rows||[]).some(r=>Number(r.nekopos_count||0)>0);
+  if(hasNekoPdf)h=h.replace('<th style="border:1px solid #94a3b8;padding:5px;">集荷</th>','<th style="border:1px solid #94a3b8;padding:5px;">ネコポス</th><th style="border:1px solid #94a3b8;padding:5px;">集荷</th>');
   (s.daily_rows||[]).forEach(r=>{
     const d=new Date(r.date);const dn=d.getDay();
     const bg=dn===0?'#fee2e2':(dn===6?'#fef3c7':'');
@@ -2538,7 +2538,7 @@ function buildDeliveryDetailHtml(){
       ${tsPdf?`<td style="border:1px solid #94a3b8;padding:3px 6px;">${escHtml(r.worker||'')}</td>
       <td style="border:1px solid #94a3b8;padding:3px 6px;">${escHtml(r.course||'')}</td>
       <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.revenue?fmtYen(r.revenue):''}</td>`:`<td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.delivery_count||''}</td>
-      ${hasNekoPdf?`<td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.nekopos_count||''}</td><td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;color:#7c3aed;">${r.nekopos_return||''}</td>`:''}
+      ${hasNekoPdf?`<td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.nekopos_count||''}</td>`:''}
       <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.pickup_count||''}</td>
       <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.package_count||''}</td>
       <td style="border:1px solid #94a3b8;padding:3px 6px;text-align:right;">${r.revenue?fmtYen(r.revenue):''}</td>
