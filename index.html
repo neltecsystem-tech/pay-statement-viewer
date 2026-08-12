@@ -279,7 +279,11 @@ async function freshToken(){
     }
     if(s){session=s;return s.access_token||'';}
   }catch(e){}
-  return (session&&session.access_token)||'';
+  const tk=(session&&session.access_token)||'';
+  // リフレッシュに失敗しトークンが取れない = 完全に失効。空トークンのまま EF を叩くと
+  // 各カードに 401/403 が並ぶだけで利用者は原因が分からないので、ここで気付かせる。
+  if(!tk&&profile&&typeof forceRelogin==='function')forceRelogin();
+  return tk;
 }
 let profile=null;// ログイン中のユーザー
 let targetProfile=null;// 現在表示中のドライバー (自分 or 検索した他人)
@@ -704,6 +708,20 @@ async function changePhone(){
   profile.phone=phone;
   alert('✓ 電話番号を更新しました');
   loadAll();
+}
+
+// セッション切れ時の強制ログアウト。
+// 以前は各ツールのカードに「認証エラー」「権限がありません」と出るだけで、
+// 再ログインが必要なことが利用者に伝わらなかった。検知したら即ログイン画面へ戻す。
+let sessionExpiredHandled=false;
+async function forceRelogin(){
+  if(sessionExpiredHandled)return; // 3ツール同時に落ちるので1回だけ
+  sessionExpiredHandled=true;
+  try{ await doLogout(); }catch(_){}
+  alert('ログインの有効期限が切れました。\nお手数ですが、もう一度ログインしてください。');
+  const el=$('login-err');
+  if(el)el.textContent='⚠ ログインの有効期限が切れました。もう一度ログインしてください。';
+  sessionExpiredHandled=false;
 }
 
 async function doLogout(){
@@ -1572,7 +1590,9 @@ async function loadFor(phone, name, tp, fromCompany){
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+anon},
         body:JSON.stringify({phone,name:name||'',year_month:ym,auth_token:userJwt})
       });
-      if(resp.status===401)return {error:'認証エラー',code:'AUTH'};
+      // 401 はトークン失効が確定。放置すると各カードにエラー文言が出るだけで
+      // 何をすべきか伝わらないため、即座にログイン画面へ戻す。
+      if(resp.status===401){ forceRelogin(); return {error:'ログインの有効期限が切れました',code:'AUTH'}; }
       if(resp.status===403)return {error:'この明細にアクセスする権限がありません',code:'FORBIDDEN'};
       if(!resp.ok)return {error:`HTTP ${resp.status}`};
       return await resp.json();
