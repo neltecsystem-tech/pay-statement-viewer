@@ -1370,13 +1370,47 @@ async function refinalizeMonth(){
   loadAllPayees(); // 一覧を最新で取り直す
 }
 
+// ツール内部の金額の作り(歩合控除など)を展開する。
+// ビューアの下段の内訳は会計マスタ由来の控除(リース料/計算手数料など)だけで、
+// 各ツールが「外注費」を出すまでの計算(アスクルの個建×控除率、ヤマトの歩合など)は
+// 1行に潰れていた。ツールの明細書と突き合わせられるよう、外注費の手前を見せる。
+function _payeeToolBreakdown(it){
+  const st=it.st||{}; const n=(v)=>Number(v||0);
+  const rows=[];
+  if(it.toolKey==='shift'){
+    if(n(st.am_sum))rows.push(['朝刊 合計',n(st.am_sum),false]);
+    if(n(st.pm_sum))rows.push(['夕刊・競馬 合計',n(st.pm_sum),false]);
+    if(n(st.planner_allowance))rows.push(['プランナー手当',n(st.planner_allowance),false]);
+  }else if(it.toolKey==='askul'){
+    if(n(st.kodate_total))rows.push(['個建 合計',n(st.kodate_total),false]);
+    if(n(st.vehicle_total))rows.push(['車建 合計（控除対象外）',n(st.vehicle_total),false]);
+    if(n(st.deduction_amount))rows.push([`控除（個建のみ ${n(st.deduction_rate)}%）`,n(st.deduction_amount),true]);
+  }else if(it.toolKey==='delivery'){
+    if(n(st.revenue))rows.push(['売上（歩合前）',n(st.revenue),false]);
+    if(n(st.allowance_total))rows.push(['手当・特別日当',n(st.allowance_total),false]);
+    if(n(st.vehicle_day_total))rows.push(['車両日額',n(st.vehicle_day_total),false]);
+    if(n(st.deduction_amount))rows.push(['歩合控除',n(st.deduction_amount),true]);
+    if(n(st.other_deduction))rows.push(['その他控除',n(st.other_deduction),true]);
+  }
+  // 1項目だけ(=分解になっていない)なら出さない
+  if(rows.length<2)return '';
+  const line=(l,v,minus)=>`<div style="display:flex;justify-content:space-between;padding:2px 0;${minus?'color:#b91c1c;':''}"><span>${escHtml(l)}</span><span style="font-weight:600;">${minus?'▲':''}${fmtYen(v)}</span></div>`;
+  return `<div style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:12px;background:#f8fafc;">
+    <div style="font-size:11px;color:var(--text-sub);margin-bottom:3px;">計算の内訳</div>
+    ${rows.map(r=>line(r[0],r[1],r[2])).join('')}
+    <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:4px;padding-top:4px;font-weight:700;"><span>外注費（税抜）</span><span>${fmtYen(it.amount)}</span></div>
+  </div>`;
+}
+
 function _payeeDetailFor(it){
   const st=it.st||{};
   let h='';
   if(it.toolKey==='shift')h=renderShiftDetail(st.rows||[]);
   else if(it.toolKey==='askul')h=renderAskulDetail(st);
   else if(it.toolKey==='delivery')h=renderDeliveryDetail(st.daily_rows||[],st.daily_kind);
-  return h||'<div style="color:var(--text-sub);font-size:12px;padding:6px 0;">日別明細なし</div>';
+  const bd=_payeeToolBreakdown(it);
+  if(!h)return bd||'<div style="color:var(--text-sub);font-size:12px;padding:6px 0;">日別明細なし</div>';
+  return bd+h;
 }
 window.togglePayeeGroup=function(i){
   const g=(_allGroups||[]).find(x=>x._i===i); const box=$('pg-detail-'+i); if(!g||!box)return;
