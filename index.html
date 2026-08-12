@@ -1374,8 +1374,8 @@ async function refinalizeMonth(){
 // ビューアの下段の内訳は会計マスタ由来の控除(リース料/計算手数料など)だけで、
 // 各ツールが「外注費」を出すまでの計算(アスクルの個建×控除率、ヤマトの歩合など)は
 // 1行に潰れていた。ツールの明細書と突き合わせられるよう、外注費の手前を見せる。
-function _payeeToolBreakdown(it){
-  const st=it.st||{}; const n=(v)=>Number(v||0);
+function _payeeToolBreakdown(toolKey,st,amount,footLabel){
+  const it={toolKey,amount}; st=st||{}; const n=(v)=>Number(v||0);
   const rows=[];
   if(it.toolKey==='shift'){
     if(n(st.am_sum))rows.push(['朝刊 合計',n(st.am_sum),false]);
@@ -1398,7 +1398,7 @@ function _payeeToolBreakdown(it){
   return `<div style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:12px;background:#f8fafc;">
     <div style="font-size:11px;color:var(--text-sub);margin-bottom:3px;">計算の内訳</div>
     ${rows.map(r=>line(r[0],r[1],r[2])).join('')}
-    <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:4px;padding-top:4px;font-weight:700;"><span>外注費（税抜）</span><span>${fmtYen(it.amount)}</span></div>
+    <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:4px;padding-top:4px;font-weight:700;"><span>${escHtml(footLabel||'外注費（税抜）')}</span><span>${fmtYen(it.amount)}</span></div>
   </div>`;
 }
 
@@ -1408,7 +1408,7 @@ function _payeeDetailFor(it){
   if(it.toolKey==='shift')h=renderShiftDetail(st.rows||[]);
   else if(it.toolKey==='askul')h=renderAskulDetail(st);
   else if(it.toolKey==='delivery')h=renderDeliveryDetail(st.daily_rows||[],st.daily_kind);
-  const bd=_payeeToolBreakdown(it);
+  const bd=_payeeToolBreakdown(it.toolKey,st,it.amount);
   if(!h)return bd||'<div style="color:var(--text-sub);font-size:12px;padding:6px 0;">日別明細なし</div>';
   return bd+h;
 }
@@ -1457,6 +1457,7 @@ window.togglePayeeDetail=function(idx){
       if(p.toolKey==='shift')h=renderShiftDetail(st.rows||[]);
       else if(p.toolKey==='askul')h=renderAskulDetail(st);
       else if(p.toolKey==='delivery')h=renderDeliveryDetail(st.daily_rows||[],st.daily_kind);
+      h=_payeeToolBreakdown(p.toolKey,st,p.amount)+h;
       h=(h||'<div style="color:var(--text-sub);font-size:12px;padding:8px 0;">日別明細なし</div>')
         +`<div style="text-align:right;margin-top:8px;"><button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="viewPayee(${idx})">→ この支払先を個別表示（PDF発行）</button></div>`;
       box.innerHTML=h; box.dataset.loaded='1';
@@ -1842,7 +1843,7 @@ function renderShiftCard(r,ym){
         `}
         <div class="muted" style="margin-top:6px;">確定 ${finalized}${modified}</div>
         ${hide?'':`<button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
-        <div class="detail-body" style="display:none;">${renderShiftDetail(s.rows||[])}</div>`}
+        <div class="detail-body" style="display:none;">${_payeeToolBreakdown('shift',s,Number(s.grand_total)||0,'月合計')}${renderShiftDetail(s.rows||[])}</div>`}
       </div>`;
     }).join('');
   }
@@ -1897,7 +1898,7 @@ function renderAskulCard(r,ym){
         `}
         <div class="muted" style="margin-top:6px;">確定 ${finalized}${modified}</div>
         ${hide?'':`<button class="detail-toggle" onclick="toggleDetail(this)">📅 日別・件数明細を見る</button>
-        <div class="detail-body" style="display:none;">${renderAskulDetail(s)}</div>`}
+        <div class="detail-body" style="display:none;">${_payeeToolBreakdown('askul',s,Number(s.payment_amount)||0,'お支払い額')}${renderAskulDetail(s)}</div>`}
       </div>`;
     }).join('');
   }
@@ -1990,7 +1991,7 @@ function renderDeliveryCard(r,ym){
         `}
         ${finalized?`<div class="muted" style="margin-top:6px;">確定 ${finalized}</div>`:''}
         ${hide?'':`<button class="detail-toggle" onclick="toggleDetail(this)">📅 日別を見る</button>
-        <div class="detail-body" style="display:none;">${renderDeliveryDetail(s.daily_rows||[],s.daily_kind)}</div>`}
+        <div class="detail-body" style="display:none;">${_payeeToolBreakdown('delivery',s,Number(s.payment_amount)||0,'支払額')}${renderDeliveryDetail(s.daily_rows||[],s.daily_kind)}</div>`}
       </div>`;
     }).join('');
   }
@@ -2730,9 +2731,9 @@ function buildPayeeDetailHtml(p){
   let detail='';
   const st=p.st||{};
   // アスクルは お支払い額計算の内訳 + 日別表(件数明細は別ページ buildAskulMatrixPage)。
-  if(p.toolKey==='shift')detail=renderShiftDetail(st.rows||[]);
-  else if(p.toolKey==='askul')detail=buildAskulSummaryBoxes(st)+renderAskulDaily(st.daily_rows||[]);
-  else if(p.toolKey==='delivery')detail=renderDeliveryDetail(st.daily_rows||[],st.daily_kind);
+  if(p.toolKey==='shift')detail=_payeeToolBreakdown('shift',st,p.amount)+renderShiftDetail(st.rows||[]);
+  else if(p.toolKey==='askul')detail=buildAskulSummaryBoxes(st)+renderAskulDaily(st.daily_rows||[]); // アスクルは専用の内訳ボックスあり
+  else if(p.toolKey==='delivery')detail=_payeeToolBreakdown('delivery',st,p.amount)+renderDeliveryDetail(st.daily_rows||[],st.daily_kind);
   return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans',sans-serif;color:#111;padding:28px 32px;">
     <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid ${p.color};padding-bottom:8px;margin-bottom:14px;">
       <div><div style="font-size:11px;color:#64748b;">${p.tool}　別紙明細</div>
