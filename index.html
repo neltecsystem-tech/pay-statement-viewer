@@ -1386,7 +1386,7 @@ function _payeeToolBreakdown(toolKey,st,amount,footLabel){
     if(n(st.vehicle_total))rows.push(['車建 合計（控除対象外）',n(st.vehicle_total),false]);
     if(n(st.deduction_amount))rows.push([`控除（個建のみ ${n(st.deduction_rate)}%）`,n(st.deduction_amount),true]);
   }else if(it.toolKey==='delivery'){
-    if(n(st.revenue))rows.push(['売上（歩合前）',n(st.revenue),false]);
+    if(n(st.revenue))rows.push(['売上',n(st.revenue),false]);
     if(n(st.allowance_total))rows.push(['手当・特別日当',n(st.allowance_total),false]);
     if(n(st.vehicle_day_total))rows.push(['車両日額',n(st.vehicle_day_total),false]);
     if(n(st.deduction_amount))rows.push(['歩合控除',n(st.deduction_amount),true]);
