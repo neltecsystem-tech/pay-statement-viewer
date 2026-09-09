@@ -293,7 +293,20 @@ function $(id){return document.getElementById(id);}
 
 function normalizePhone(s){
   if(!s)return '';
-  return String(s).replace(/[０-９]/g,ch=>String.fromCharCode(ch.charCodeAt(0)-0xff10+0x30)).replace(/[^\d]/g,'');
+  const d=String(s).replace(/[０-９]/g,ch=>String.fromCharCode(ch.charCodeAt(0)-0xff10+0x30)).replace(/[^\d]/g,'');
+  // 先頭0落ちの携帯を11桁へ戻す。0始まりの固定電話は10桁でも対象外。EF側と同じ規則。
+  return d.length===10&&/^[789]/.test(d)?'0'+d:d;
+}
+// 手入力された電話が明細の照合キーとして使える形か。使えなければ理由を返す。
+// 明細は phone の完全一致で引くので、桁が足りない番号を保存すると本人には
+// 「明細がありません」としか見えず、原因に辿り着けない。
+function phoneInputError(ph){
+  if(!ph)return '電話番号を入力してください';
+  if(/^0[789]0\d{8}$/.test(ph))return '';        // 携帯 11桁
+  if(/^0\d{9}$/.test(ph))return '';              // 固定電話 10桁
+  if(ph.length<10)return `桁数が足りません (${ph.length}桁)。市外局番からハイフン無しでも構いません`;
+  if(ph.length>11)return `桁数が多すぎます (${ph.length}桁)`;
+  return '電話番号の形式が正しくありません。先頭の0から入力してください';
 }
 
 // 適格請求書 登録番号 (T+13桁)。全角→半角・T以外/数字以外を除去
@@ -431,6 +444,17 @@ async function postLogin(){
     $('btn-central-master').style.display='inline-flex';
   }
 
+  // 🔧 2026-09-09: 電話が空のとき、いきなり本人に手入力させていた。中央人材マスタには
+  //    正しい番号があるので、あればそれを黙って採用する。明細は phone の完全一致で引くため、
+  //    打ち間違えると「明細がありません」になり「まだ公開前」と見分けがつかない
+  //    (平松鼓=先頭0落ち・零井上=9桁 が実際にこれで見られなくなっていた)。
+  if(!profile.phone){
+    const centralPhone=normalizePhone(window._myCentral?.phone||'');
+    if(centralPhone){
+      const {error:_pe}=await sb.from('profiles').update({phone:centralPhone}).eq('id',session.user.id);
+      if(!_pe)profile.phone=centralPhone;
+    }
+  }
   if(!profile.phone){
     await promptPhone();
   }
@@ -616,7 +640,7 @@ async function loadMyCentral(){
   try{
     const ph=normalizePhone(profile?.phone||'');
     const or=[`profile_id.eq.${session.user.id}`,ph?`phone.eq.${ph}`:''].filter(Boolean).join(',');
-    const {data}=await sb.from('staff_master').select('category,is_company_owner,is_company_contact,company_name').or(or).limit(1);
+    const {data}=await sb.from('staff_master').select('category,is_company_owner,is_company_contact,company_name,phone').or(or).limit(1);
     window._myCentral=(data&&data[0])||null;
   }catch(_){ window._myCentral=window._myCentral||null; }
   return window._myCentral;
@@ -665,7 +689,8 @@ async function promptPhone(){
     overlay.className='modal-overlay';
     overlay.innerHTML=`<div class="modal">
       <h3>📱 電話番号を登録</h3>
-      <p>支払明細を表示するために、電話番号を登録してください (初回のみ)。新聞シフト/アスクル/デリバリー で登録されている番号と同じものを入力してください。</p>
+      <p>支払明細を表示するために、電話番号を登録してください (初回のみ)。<b>先頭の0から、11桁すべて</b>入力してください。番号が1桁でも違うと明細は表示されません。</p>
+      <p style="font-size:12px;color:var(--text-sub);margin-top:-4px;">新聞シフト/アスクル/デリバリー に登録済みの番号と同じものを入力してください。分からない場合は「後で」を押し、担当者にお問い合わせください。</p>
       <input type="tel" id="reg-phone" class="input" placeholder="例 090-1234-5678" style="width:100%;margin-bottom:8px;">
       <div id="reg-err" style="color:var(--danger);font-size:12px;margin-bottom:8px;display:none;"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;">
@@ -689,7 +714,12 @@ window.savePhonePrompt=async function(){
   const phone=normalizePhone(raw);
   const err=$('reg-err');
   err.style.display='none';
-  if(!phone||phone.length<10){err.textContent='正しい電話番号を入力してください';err.style.display='block';return;}
+  const verr=phoneInputError(phone);
+  if(verr){err.textContent=verr;err.style.display='block';return;}
+  // 中央人材マスタに番号があるなら、それと違う入力は確認する(打ち間違いで明細が0件になるのを防ぐ)
+  const centralPhone=normalizePhone(window._myCentral?.phone||'');
+  if(centralPhone&&centralPhone!==phone
+    &&!confirm(`入力された番号 ${phone} は、登録されている ${centralPhone} と違います。\n\n違う番号を登録すると支払明細が表示されません。このまま進めますか？`))return;
   const {error}=await sb.from('profiles').update({phone}).eq('id',session.user.id);
   if(error){err.textContent='保存失敗: '+error.message;err.style.display='block';return;}
   profile.phone=phone;
@@ -702,7 +732,11 @@ async function changePhone(){
   const raw=prompt(`登録電話番号: ${cur||'(未登録)'}\n新しい番号を入力してください (ハイフン可):`,cur);
   if(raw===null)return;
   const phone=normalizePhone(raw);
-  if(!phone||phone.length<10){alert('正しい電話番号を入力してください');return;}
+  const verr=phoneInputError(phone);
+  if(verr){alert(verr);return;}
+  const centralPhone=normalizePhone(window._myCentral?.phone||'');
+  if(centralPhone&&centralPhone!==phone
+    &&!confirm(`入力された番号 ${phone} は、登録されている ${centralPhone} と違います。\n\n違う番号を登録すると支払明細が表示されません。このまま進めますか？`))return;
   const {error}=await sb.from('profiles').update({phone}).eq('id',session.user.id);
   if(error){alert('保存失敗: '+error.message);return;}
   profile.phone=phone;
