@@ -325,6 +325,28 @@ function hwKanaToFw(s){ let t=String(s||''); for(const k in _HW_KANA2)t=t.split(
 // 会社名/取引先名の表記ゆれ吸収 (半角カナ・株式会社/合同会社・記号・空白を除去)
 // 🔧 2026-08-06: 半角カナを畳んでいなかったため「TLC.ﾊﾟｰﾄﾅｰｽﾞ㈱」が会計マスタ
 //    「TLC.パートナーズ株式会社」と一致せず、適格判定が外れて消費税・登録番号が落ちていた。
+// 🚨 支払先(宛名)になり得ない語。委託元(荷主)と自社の営業所名。
+//   これらが各ツールの「会社名」欄に入っていることがあり(例: アスクル配送の個人事業主4名に
+//   company_name='アスクル')、そのまま宛名にすると支払通知書が「アスクル 様」になる。
+//   委託元はお金を受け取る側ではなく渡す側、営業所は自社の場所なので、どちらも支払先ではない。
+//   会計の「会社名の正規化設定」(non_company_names)と同じ考え方だが、あの表は管理者しか
+//   読めない(RLS)ため、本人がPDFを出すときに消えてしまう。ここは意図的に直書きする。
+//   ※営業所を新設したらここにも足す。
+const NON_PAYEE_CO = [
+  'アスクル', 'ASKUL', 'アスクル株式会社', 'ASKUL LOGIST',
+  'ヤマト', 'ヤマト運輸', 'SBS', 'SBSネクサード株式会社',
+  '東スポ', '東京スポーツ', '新聞', 'デリバリー', '配送',
+  '城北', '川越', '立川', '川崎高津',
+];
+let _nonPayeeKeys=null;
+function isNonPayeeCo(v){
+  const k=normCo(v); if(!k)return false;
+  if(!_nonPayeeKeys)_nonPayeeKeys=new Set(NON_PAYEE_CO.map(normCo).filter(Boolean));
+  return _nonPayeeKeys.has(k);
+}
+// 支払先として使える会社名だけを返す(委託元/営業所なら空)
+function payeeCoOrEmpty(v){ const s=String(v||'').trim(); return (!s||isNonPayeeCo(s))?'':s; }
+
 function normCo(s){
   return hwKanaToFw(String(s||''))
     .replace(/[Ａ-Ｚａ-ｚ０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0))
@@ -2189,10 +2211,13 @@ function formalPayeeName(){
   const ym=currentData.ym||'';
   const okMonth=p=>(!p.effective_from||String(p.effective_from).slice(0,7)<=(ym||'9999-99'));
   const personal=ownerName();
-  const stmtCo=(currentData.shift?.statements?.[0]?.company_name)
-             ||(currentData.askul?.statements?.[0]?.company_name)
-             ||(currentData.delivery?.statements?.[0]?.company_name)
-             ||(targetProfile?.company)||'';
+  // 🚨 会社名の欄に委託元(アスクル/ヤマト等)や営業所名(城北/川越等)が入っていることがある。
+  //    それを宛名にすると「アスクル 様」のような支払通知書が出てしまうので、支払先に
+  //    なり得ない語は無かったものとして扱い、次の候補(=本人氏名)へ落とす。
+  const stmtCo=payeeCoOrEmpty(currentData.shift?.statements?.[0]?.company_name)
+             ||payeeCoOrEmpty(currentData.askul?.statements?.[0]?.company_name)
+             ||payeeCoOrEmpty(currentData.delivery?.statements?.[0]?.company_name)
+             ||payeeCoOrEmpty(targetProfile?.company)||'';
   // ① 会計マスタ正式名称: 会社名で照合(表記ゆれ吸収)
   const coKey=normCo(stmtCo);
   if(coKey){const hit=invPartners.find(p=>normCo(p.name)===coKey&&okMonth(p));if(hit&&hit.name)return hit.name;}
