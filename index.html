@@ -1703,11 +1703,12 @@ async function loadFor(phone, name, tp, fromCompany){
   };
 
   // 控除は会計「車両リース・貸付金マスタ」から連携 (取引先名=氏名で照合)
-  const [shift,askul,delivery]=await Promise.all([
+  const [shift,askul,delivery,,payslip]=await Promise.all([
     callEf(SHIFT_URL,SUPABASE_ANON),
     callEf(ASKUL_URL,ASKUL_ANON),
     callEf(DELIVERY_URL,DELIVERY_ANON),
     loadAccDeductions(ym),
+    loadPayslip(ym),
   ]);
   // 取引先名: NexPort表示名 → 無ければ各ツールの明細上の氏名
   const nm=(targetProfile&&targetProfile.display_name)
@@ -1719,11 +1720,133 @@ async function loadFor(phone, name, tp, fromCompany){
   const dedNote=accNoteFor(nm);
   const _found={shift:!!(shift&&shift.found),askul:!!(askul&&askul.found),delivery:!!(delivery&&delivery.found)};
   try{window._pdfPending=await pendingToolsForPerson(phone,ym,_found);}catch(_){window._pdfPending=[];}
-  renderResults({shift,askul,delivery,deductions,dedNote,ym,phone});
+  renderResults({shift,askul,delivery,deductions,dedNote,ym,phone,payslip});
 }
 
-function renderResults({shift,askul,delivery,deductions,dedNote,ym,phone}){
-  currentData={shift,askul,delivery,deductions:deductions||[],dedNote:dedNote||'',ym,phone};
+// ── 社員の給与明細 (会計の給与計算 acc_payroll_lines) ──
+// RPC get_payslip が本人分だけを返す。本人は会計で「確定」した月だけ見える。
+// 給与担当(salary_admin)は他人・下書きも見える(published=false の時は「本人には未公開」と出す)。
+async function loadPayslip(ym){
+  const pid=targetProfile&&targetProfile.id;
+  if(!pid)return null;
+  try{
+    const {data,error}=await sb.rpc('get_payslip',{p_year_month:ym,p_profile_id:pid});
+    if(error)return null;
+    return data||null;
+  }catch(_){return null;}
+}
+const _PS_PAY=[
+  ['pay_base','基本給',1],['pay_post','役職手当'],['pay_life_plan','生涯設計手当'],['pay_other','その他手当'],
+  ['pay_overtime','時間外手当'],['pay_night','深夜手当'],['pay_holiday','休日手当'],['pay_short','不足時間控除'],
+  ['pay_commute_taxable','通勤手当(課税)'],['pay_commute_free','通勤手当(非課税)'],
+];
+const _PS_DED=[
+  ['ded_health','健康保険'],['ded_care','介護保険'],['ded_child_support','子ども・子育て支援金'],
+  ['ded_pension','厚生年金'],['ded_employment','雇用保険',1],['ded_dc','確定拠出年金'],
+  ['ded_income_tax','所得税',1],['ded_resident_tax','住民税',1],['advance_amount','立替経費の精算'],
+];
+// 0円の行は出さない(基本給・雇用保険・所得税・住民税だけは0でも出す)
+const _psRows=(p,defs)=>defs.filter(([k,,always])=>always||Number(p[k]||0)!==0);
+const _psYen=n=>{const v=Math.round(Number(n)||0);return (v<0?'−':'')+'¥'+Math.abs(v).toLocaleString();};
+const _psH=n=>(Math.round((Number(n)||0)*100)/100).toFixed(2);
+function _psAttend(p){
+  const a=[['実働',p.total_work_hours],['時間外',p.ot_hours],['深夜',p.night_hours],['法定休日',p.holiday_hours],['有給',p.paid_leave_hours],['不足',p.short_hours]];
+  return a.filter(([,v],i)=>i===0||Number(v||0)!==0);
+}
+
+function renderPayslipCard(p,ym){
+  if(!p)return '';
+  if(!p.found){
+    if(p.reason!=='not_published')return '';
+    return `<div class="card" style="border-color:#93c5fd;background:#eff6ff;padding:12px 14px;">
+      <div style="font-weight:700;color:#1d4ed8;">💴 給与明細</div>
+      <div style="font-size:12px;color:#1e40af;margin-top:4px;">🔒 ${escHtml(ym)} の給与明細は、給与の確定後に公開されます。</div>
+    </div>`;
+  }
+  const row=(l,v)=>`<div class="amount-row"><span class="label">${escHtml(l)}</span><span class="value">${_psYen(v)}</span></div>`;
+  const draft=!p.published
+    ?`<div style="font-size:11px;color:#b45309;background:#fef3c7;border-radius:6px;padding:5px 8px;margin-bottom:8px;">📝 下書き（会計でまだ確定していないため、本人には見えていません）</div>`:'';
+  return `<div class="card" style="border-color:#3b82f6;">
+    <div class="card-header" style="justify-content:space-between;">
+      <span style="font-weight:700;color:#1d4ed8;">💴 給与明細 ${escHtml(ym)}</span>
+      <button class="btn" style="background:#0ea5e9;padding:4px 10px;font-size:12px;" onclick="downloadPayslipPdf(this)">📄 PDF</button>
+    </div>
+    ${draft}
+    <div class="grand-total-card" style="background:linear-gradient(135deg,#dbeafe,#bfdbfe);border-color:#3b82f6;margin-bottom:12px;">
+      <div class="label">差引支給額（お振込額）</div>
+      <div class="value">${_psYen(p.net_pay)}</div>
+      <div style="font-size:11px;color:#1e3a8a;margin-top:6px;">支給合計 ${_psYen(p.gross_total)} − 控除合計 ${_psYen(p.ded_total)}</div>
+    </div>
+    <div style="font-size:12px;font-weight:700;color:var(--text-sub);margin:4px 0;">支給</div>
+    ${_psRows(p,_PS_PAY).map(([k,l])=>row(l,p[k])).join('')}
+    <div class="amount-row" style="border-top:1px solid var(--border);"><span class="label" style="font-weight:700;">支給合計</span><span class="value" style="font-weight:700;">${_psYen(p.gross_total)}</span></div>
+    <div style="font-size:12px;font-weight:700;color:var(--text-sub);margin:10px 0 4px;">控除</div>
+    ${_psRows(p,_PS_DED).map(([k,l])=>row(l,p[k])).join('')}
+    <div class="amount-row" style="border-top:1px solid var(--border);"><span class="label" style="font-weight:700;">控除合計</span><span class="value" style="font-weight:700;color:#dc2626;">${_psYen(p.ded_total)}</span></div>
+    <div style="font-size:12px;font-weight:700;color:var(--text-sub);margin:10px 0 4px;">勤怠</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+      ${_psAttend(p).map(([l,v])=>`<span style="font-size:12px;background:#f1f5f9;border-radius:6px;padding:3px 8px;">${escHtml(l)} <b>${_psH(v)}h</b></span>`).join('')}
+    </div>
+  </div>`;
+}
+
+function buildPayslipHtml(p,ym){
+  const [y,m]=String(ym).split('-').map(Number);
+  const cell='padding:6px 10px;font-size:12px;border:1px solid #d1d5db;';
+  const tbl=(title,defs,totalLabel,totalVal)=>`<table style="width:100%;border-collapse:collapse;">
+    <tr><th colspan="2" style="${cell}background:#f3f4f6;text-align:left;">${title}</th></tr>
+    ${_psRows(p,defs).map(([k,l])=>`<tr><td style="${cell}">${escHtml(l)}</td><td style="${cell}text-align:right;">${_psYen(p[k])}</td></tr>`).join('')}
+    <tr><td style="${cell}font-weight:700;">${totalLabel}</td><td style="${cell}text-align:right;font-weight:700;">${_psYen(totalVal)}</td></tr>
+  </table>`;
+  const att=_psAttend(p);
+  const now=new Date();
+  return `<div style="width:760px;box-sizing:border-box;background:#fff;font-family:'Yu Gothic UI','Hiragino Sans','Hiragino Kaku Gothic Pro',sans-serif;color:#111;padding:34px 42px 30px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;">
+      <h1 style="margin:0;font-size:30px;font-weight:800;letter-spacing:8px;">給与明細書</h1>
+      <div style="text-align:right;font-size:12px;line-height:1.9;">
+        <div>${escHtml(eraLabel(y,m))}</div>
+        <div>発行日：${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日</div>
+        ${p.employee_no?`<div>社員番号：${escHtml(p.employee_no)}</div>`:''}
+      </div>
+    </div>
+    <div style="font-size:20px;font-weight:700;border-bottom:1.5px solid #111;padding-bottom:4px;display:inline-block;min-width:260px;margin-bottom:18px;">${escHtml(p.staff_name)}<span style="font-size:14px;font-weight:400;margin-left:24px;">様</span></div>
+    ${p.published?'':`<div style="font-size:12px;color:#b45309;margin-bottom:10px;">※ 下書き（未確定）</div>`}
+    <div style="display:flex;align-items:center;gap:16px;background:#f8fafc;border:1px solid #111;border-radius:4px;padding:12px 18px;margin-bottom:18px;">
+      <div style="font-size:15px;font-weight:700;letter-spacing:2px;">差引支給額</div>
+      <div style="font-size:28px;font-weight:800;flex:1;text-align:right;">${_psYen(p.net_pay)}</div>
+    </div>
+    <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px;">
+      <div style="flex:1;">${tbl('支給',_PS_PAY,'支給合計',p.gross_total)}</div>
+      <div style="flex:1;">${tbl('控除',_PS_DED,'控除合計',p.ded_total)}</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+      <tr><th colspan="${att.length}" style="${cell}background:#f3f4f6;text-align:left;">勤怠（時間）</th></tr>
+      <tr>${att.map(([l])=>`<td style="${cell}text-align:center;color:#6b7280;">${escHtml(l)}</td>`).join('')}</tr>
+      <tr>${att.map(([,v])=>`<td style="${cell}text-align:center;font-weight:600;">${_psH(v)}</td>`).join('')}</tr>
+    </table>
+    <div style="font-size:13px;font-weight:700;border-left:4px solid #111;padding-left:8px;margin-bottom:8px;">発行元</div>
+    <div style="position:relative;font-size:12px;line-height:1.9;border:1px solid #d1d5db;border-radius:4px;padding:12px 18px;">
+      <div><span style="display:inline-block;width:66px;color:#6b7280;">会社名</span>株式会社ＮＥＬＴＥＣ</div>
+      <div><span style="display:inline-block;width:66px;color:#6b7280;vertical-align:top;">所在地</span>〒170-0005 東京都豊島区南大塚2-38-1<br><span style="display:inline-block;width:66px;"></span>REID-C大塚ビル 5階</div>
+      <img src="${STAMP_DATA_URI}" alt="印" style="position:absolute;top:8px;right:18px;width:72px;height:72px;" />
+    </div>
+  </div>`;
+}
+
+window.downloadPayslipPdf=async function(btn){
+  const p=currentData&&currentData.payslip;
+  if(!p||!p.found)return;
+  const old=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='⏳ 生成中...';}
+  try{
+    const pdf=await renderToPdfBlob(buildPayslipHtml(p,currentData.ym));
+    pdf.save(safeFile(`${currentData.ym}_給与明細_${p.staff_name}.pdf`));
+  }catch(e){alert('PDF生成失敗: '+e.message);}
+  if(btn){btn.textContent=old;btn.disabled=false;}
+};
+
+function renderResults({shift,askul,delivery,deductions,dedNote,ym,phone,payslip}){
+  currentData={shift,askul,delivery,deductions:deductions||[],dedNote:dedNote||'',ym,phone,payslip:payslip||null};
   const area=$('result-area');
   const toolTotal=calcTotal({shift,askul,delivery});
   const foundCount=[shift,askul,delivery].filter(r=>r&&r.found).length;
@@ -1734,6 +1857,7 @@ function renderResults({shift,askul,delivery,deductions,dedNote,ym,phone}){
   $('btn-all-pdf').disabled=foundCount===0;
 
   let html='';
+  html+=renderPayslipCard(payslip,ym);
   if(window._pdfPending&&window._pdfPending.length)html+=pendingBannerHtml(window._pdfPending);
   if(window._fromCompany&&window._lastCompany){
     html+=`<div style="margin-bottom:12px;"><button class="btn btn-secondary" onclick="loadCompany(window._lastCompany)">← 「${escHtml(window._lastCompany)}」法人集計に戻る</button></div>`;
@@ -1805,7 +1929,7 @@ function renderResults({shift,askul,delivery,deductions,dedNote,ym,phone}){
   html+=renderAskulCard(askul,ym);
   html+=renderDeliveryCard(delivery,ym);
 
-  if(foundCount===0){
+  if(foundCount===0 && !(payslip&&(payslip.found||payslip.reason==='not_published'))){
     html+=`<div class="card empty">
       <div style="font-size:32px;margin-bottom:8px;">🔎</div>
       <div>該当データなし</div>
