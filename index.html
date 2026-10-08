@@ -992,6 +992,7 @@ function renderCompanyAgg(company, ym, tools){
   if(!dedItems.length){
     dedItems=accPayeesDedItems(payees,ym);
   }
+  dedItems=withPayeePenalties(dedItems,payees);
   const dedTotal=dedItems.reduce((a,d)=>a+d.amount,0);
   // 適格判定(会計マスタ invPartners)→適格なら消費税(10%)を上乗せ(支払通知書PDFと一致)。外注費(税抜)=ツール合計。
   const _okM=p=>(!p.effective_from||String(p.effective_from).slice(0,7)<=(ym||'9999-99'));
@@ -1267,6 +1268,7 @@ function payeeDedItems(g,ym){
   if(g.kind==='company'){
     let {items}=accCompanyDeduction(g.label||g.company||'',ym);
     if(!items.length)items=accPayeesDedItems(g.items.map(it=>({name:it.name})),ym);
+    items=withPayeePenalties(items,g.items.map(it=>({name:it.name})));
     return items.map(d=>({label:d.name,amount:d.amount}));
   }
   return accDedItems(g.label,ym).map(d=>({label:d.label,amount:d.amount}));
@@ -1561,11 +1563,41 @@ async function loadTargetProfile(phone, tp){
 // 管理者/経理は全取引先、一般は本人分のみ返る。会計と同じロジックで当月控除を算出。
 let _accDed={rows:[],ov:[]};
 async function loadAccDeductions(month){
+  await Promise.all([
+    (async()=>{
+      try{
+        const {data,error}=await sb.rpc('get_driver_deductions',{p_month:month});
+        if(error||!data){_accDed={rows:[],ov:[]};return;}
+        _accDed={rows:data.rows||[],ov:data.overrides||[]};
+      }catch(e){_accDed={rows:[],ov:[]};}
+    })(),
+    loadAccPenalties(month),
+  ]);
+}
+// ── 違約金(2026-10-08): 現場3ツールの特別日当で種別「違約金」として登録したもの ──
+// 会計が支払計算書の「その他控除」に「違約金」として入れて支払額から引く。ビューアの控除も同じ額を出す。
+// 照合は氏名(支払先名)。RPC get_driver_penalties は 会計担当=全員分 / 本人=自分(氏名・会社名一致)の分だけ返す。
+let _accPen=[];
+async function loadAccPenalties(month){
   try{
-    const {data,error}=await sb.rpc('get_driver_deductions',{p_month:month});
-    if(error||!data){_accDed={rows:[],ov:[]};return;}
-    _accDed={rows:data.rows||[],ov:data.overrides||[]};
-  }catch(e){_accDed={rows:[],ov:[]};}
+    const {data,error}=await sb.rpc('get_driver_penalties',{p_month:month});
+    _accPen=(!error&&Array.isArray(data))?data:[];
+  }catch(e){_accPen=[];}
+}
+function accPenaltyFor(name){
+  const key=nmKey(name||'');if(!key)return 0;
+  return (_accPen||[]).filter(p=>nmKey(p.name||'')===key).reduce((a,p)=>a+(Number(p.amount)||0),0);
+}
+// 法人まとめ: 支払先(氏名)ごとの違約金を控除項目に足す。会社名マスタの有無に関係なく足す。
+function withPayeePenalties(items,payees){
+  const out=[...(items||[])];
+  const seen=new Set();
+  (payees||[]).forEach(p=>{
+    const k=nmKey(p.name||'');if(!k||seen.has(k))return;seen.add(k);
+    const amt=accPenaltyFor(p.name);
+    if(amt>0)out.push({name:`${p.name}（違約金）`,amount:amt});
+  });
+  return out;
 }
 function _dedToIdx(s){const a=String(s||'').split('-').map(Number);return a[0]&&a[1]?a[0]*12+(a[1]-1):null;}
 function _dedIdxToYm(n){return `${Math.floor(n/12)}-${String((n%12)+1).padStart(2,'0')}`;}
@@ -1664,6 +1696,8 @@ function accDedItems(name,month){
   if(d.loan>0)items.push({label:'貸付金返済',amount:d.loan,active:true});
   if(d.receivable>0)items.push({label:'未収入金',amount:d.receivable,active:true});
   (d.customItems||[]).forEach(c=>{if(c.amount>0)items.push({label:c.name||'その他控除',amount:c.amount,active:true});});
+  const pen=accPenaltyFor(name);
+  if(pen>0)items.push({label:'違約金',amount:pen,active:true});
   return items;
 }
 // 取引先の備考(車両リース・貸付金マスタ acc_driver_deductions.note)。個人=完全一致 / 法人=部分一致の全行を集約。
@@ -2954,6 +2988,7 @@ async function downloadCompanyPdf(){
     const toolTotal=payees.reduce((a,p)=>a+p.amount,0);
     let {items:dedItems}=accCompanyDeduction(company,ym);
     if(!dedItems.length){ dedItems=accPayeesDedItems(payees,ym); }
+    dedItems=withPayeePenalties(dedItems,payees);
     const dedTotal=dedItems.reduce((a,d)=>a+d.amount,0);
     const sections=[buildCompanyCoverHtml(company,ym,payees,dedItems,dedTotal,toolTotal)];
     payees.forEach(p=>{
