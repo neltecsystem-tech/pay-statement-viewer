@@ -205,8 +205,11 @@ table.detail tr.sat{background:#fef3c7;}
     </div>
     <div style="margin-bottom:10px;">
       <label style="display:block;font-size:12px;color:var(--text-sub);margin-bottom:4px;">会社</label>
-      <input type="text" id="mem-edit-company" class="input" style="width:100%;" placeholder="例: 株式会社○○ など" list="company-suggestions" oninput="memUpdateInvoiceHint()">
-      <datalist id="company-suggestions"></datalist>
+      <!-- 表記ゆれ防止: 会計マスタの法人名からのみ選択。無ければ「＋法人新規登録」で仮登録 -->
+      <div style="display:flex;gap:6px;align-items:center;">
+        <select id="mem-edit-company" class="input" style="flex:1;min-width:0;" onchange="memUpdateInvoiceHint()"></select>
+        <button type="button" class="btn" style="white-space:nowrap;background:#6366f1;" onclick="memRegisterCompany()">＋法人新規登録</button>
+      </div>
     </div>
     <div style="margin-bottom:10px;">
       <label style="display:block;font-size:12px;color:var(--text-sub);margin-bottom:4px;">役職</label>
@@ -588,13 +591,12 @@ async function openCentralMaster(){
     const {data,error}=await sb.functions.invoke('staff-set-contact',{body:{action:'list_all'}});
     if(error||data?.error){ area.innerHTML=`<div class="card" style="color:var(--danger);">読み込み失敗: ${escHtml((data&&data.error)||error?.message||'')}</div>`; return; }
     const members=data.members||[];
-    // 会社名は会計マスタ(acc_invoice_partners)の正式名称から選択(datalist)。自由入力も可(屋号など会計マスタ外用)。
-    const accCompanies=[...new Set((invPartners||[]).map(p=>String(p.name||'').trim()).filter(Boolean))].sort();
-    const accDatalist=`<datalist id="acc-companies">${accCompanies.map(n=>`<option value="${escHtml(n)}"></option>`).join('')}</datalist>`;
+    // 会社名は会計マスタ(list-invoice-companies)の法人名からのみ選択(表記ゆれ防止)。無ければ行の「＋」で仮登録。
+    const accList=await loadAccCompanies();
     const cats=['個人','法人配下','法人オーナー','社員'];
     const catOpts=cats.map(c=>`<option value="${c}">${c}</option>`).join('');
-    let h=accDatalist+`<div class="card"><div style="font-weight:700;font-size:15px;margin-bottom:4px;">🗂 人材マスタ（<span id="cm-total">${members.length}</span>名）</div>
-      <div style="font-size:12px;color:var(--text-sub);margin-bottom:10px;line-height:1.7;">全ツール横断の人材名簿。<b>区分・会社/屋号・電話・インボイス番号</b>を1画面で設定できます。保存すると「手動」扱いになり自動同期で上書きされず、NexPortアカウント側にも反映されます。<br><b>会社名は会計マスタ(${accCompanies.length}社)から選択</b>してください（枠をクリックで候補表示・自由入力も可＝屋号など会計マスタ外用）。表記を正式名称に統一すると法人まとめが正しく合算されます。<br><b>法人配下</b>＝ビューアにログイン不可（担当者/オーナーのみ）。<b>個人/社員/オーナー</b>＝ログイン可。控除は会計マスタが正（ここでは扱いません）。</div>
+    let h=`<div class="card"><div style="font-weight:700;font-size:15px;margin-bottom:4px;">🗂 人材マスタ（<span id="cm-total">${members.length}</span>名）</div>
+      <div style="font-size:12px;color:var(--text-sub);margin-bottom:10px;line-height:1.7;">全ツール横断の人材名簿。<b>区分・会社/屋号・電話・インボイス番号</b>を1画面で設定できます。保存すると「手動」扱いになり自動同期で上書きされず、NexPortアカウント側にも反映されます。<br><b>会社名は会計マスタ(${accList.length}社)から選択</b>してください（無い法人は横の「＋」で仮登録＝（仮）表示。⚠付きは会計マスタに無い旧表記なので選び直してください）。表記を正式名称に統一すると法人まとめが正しく合算されます。<br><b>法人配下</b>＝ビューアにログイン不可（担当者/オーナーのみ）。<b>個人/社員/オーナー</b>＝ログイン可。控除は会計マスタが正（ここでは扱いません）。</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:8px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;">
         <span style="font-size:12px;font-weight:700;color:var(--text-sub);">🔍 絞り込み</span>
         <select id="cm-filter-cat" onchange="filterCentral()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
@@ -613,7 +615,8 @@ async function openCentralMaster(){
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <div style="flex:1;min-width:110px;font-weight:600;font-size:13px;">${escHtml(m.full_name||'(名前未設定)')}${mo}<span style="font-size:10px;color:var(--text-sub);margin-left:6px;">${escHtml((m.tools||[]).join('/'))}</span></div>
           <select id="cm-cat-${i}" style="padding:5px;border:1px solid var(--border);border-radius:6px;font-size:12px;">${opts}</select>
-          <input id="cm-co-${i}" list="acc-companies" value="${escHtml(m.company_name||'')}" placeholder="会社名/屋号（会計マスタから選択）" style="width:190px;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
+          <select id="cm-co-${i}" style="width:190px;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:12px;">${companyOptionsHtml(m.company_name||'')}</select>
+          <button class="btn" style="font-size:11px;padding:4px 8px;background:#6366f1;" title="＋法人新規登録(会計マスタへ仮登録)" onclick="cmRegisterCompany(${i})">＋</button>
           <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="saveCentral('${escHtml(m.match_key)}',${i},this)">保存</button>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:5px;padding-left:2px;">
@@ -3006,27 +3009,73 @@ async function downloadCompanyPdf(){
 // 管理者: メンバー管理画面
 // ───────────────────────────────────────────
 let allMembers=[];// 全 profiles のキャッシュ (admin 画面用)
-let toolCompanies=[];// 各ツール (askul/delivery) の profiles.company_name から取得した会社名候補
-
-// askul / delivery の get_company_list RPC を叩いて会社名候補を取得・キャッシュ。
-// 失敗しても datalist の NexPort 分は出るので握りつぶす。
-async function loadToolCompanies(){
-  const fetchRpc=async(base,key)=>{
+// 会社名の候補は会計マスタ(list-invoice-companies)だけ。
+// なぜ: NexPort/各ツールの既存の会社名は表記が揺れており、候補に混ぜると揺れが再生産されるため。
+const INVOICE_COMPANIES_URL=SUPABASE_URL+'/functions/v1/list-invoice-companies';
+let accCompanies=null;// [{name, pending}] 未取得=null
+let _accCompaniesInflight=null;
+async function loadAccCompanies(force){
+  if(force){accCompanies=null;_accCompaniesInflight=null;}
+  if(accCompanies)return accCompanies;
+  if(_accCompaniesInflight)return _accCompaniesInflight;
+  _accCompaniesInflight=(async()=>{
     try{
-      const r=await fetch(base+'/rest/v1/rpc/get_company_list',{
-        method:'POST',headers:{'Content-Type':'application/json','apikey':key,'Authorization':'Bearer '+key},body:'{}',
-      });
-      if(!r.ok)return [];
-      const rows=await r.json();
-      return (rows||[]).map(x=>x.company_name).filter(Boolean);
-    }catch(_){return [];}
-  };
-  const [askul,delivery]=await Promise.all([
-    fetchRpc('https://erfcsnzdooswgpvgrapb.supabase.co',ASKUL_ANON),
-    fetchRpc('https://ymdaakiwxkjotlmzveom.supabase.co',DELIVERY_ANON),
-  ]);
-  toolCompanies=[...askul,...delivery];
+      const r=await fetch(INVOICE_COMPANIES_URL,{headers:{Authorization:'Bearer '+SUPABASE_ANON}});
+      const d=await r.json();
+      accCompanies=(d?.companies||[]).map(c=>({name:String(c.name||'').trim(),pending:!!c.pending})).filter(c=>c.name);
+      return accCompanies;
+    }catch(_){_accCompaniesInflight=null;return [];}// 失敗はキャッシュしない
+  })();
+  return _accCompaniesInflight;
 }
+// 照合用の正規化(全角半角・空白の違いだけ吸収。法人格の言い換えは吸収しない＝勝手に別会社と同一視しない)
+function normCompanyKey(s){return String(s||'').normalize('NFKC').replace(/\s+/g,'');}
+
+// 会社欄<select>を描画。今の値がマスタに無い(旧表記)なら「⚠」付きで選択状態のまま残す(勝手に消さない)。
+function companyOptionsHtml(cur){
+  cur=String(cur||'').trim();
+  const list=accCompanies||[];
+  let h=`<option value=""${cur?'':' selected'}>（未所属）</option>`;
+  h+=list.map(c=>`<option value="${escHtml(c.name)}"${c.name===cur?' selected':''}>${escHtml(c.name)}${c.pending?'（仮）':''}</option>`).join('');
+  if(cur&&!list.some(c=>c.name===cur)){
+    const label=accCompanies?`⚠ ${cur}（会計マスタに無い表記）`:cur;// 未取得中は判定できないので⚠を付けない
+    h=`<option value="${escHtml(cur)}" selected>${escHtml(label)}</option>`+h;
+  }
+  return h;
+}
+function memFillCompanySelect(cur,sel){
+  sel=sel||$('mem-edit-company');if(!sel)return;
+  cur=String(cur||'').trim();
+  sel.innerHTML=companyOptionsHtml(cur);
+  sel.value=cur;
+}
+
+// ＋法人新規登録の共通処理: 会計マスタへ仮登録(pending)→候補を取り直す。成功時は確定した名前を返す
+async function registerAccCompany(){
+  const name=(prompt('会計マスタに仮登録する法人名（正式名称）を入力してください\n例: 株式会社〇〇','')||'').trim();
+  if(!name)return null;
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    if(!session?.access_token){alert('ログインし直してから登録してください');return null;}
+    const r=await fetch(INVOICE_COMPANIES_URL,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({action:'register',name,tool:'viewer'})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d?.ok||!d?.name){alert('登録できませんでした: '+(d?.error||('HTTP '+r.status)));return null;}
+    await loadAccCompanies(true);
+    alert(d.existed?`既に登録済みの「${d.name}」を選びました`:`「${d.name}」を仮登録しました。会計で確認されるまで（仮）と表示されます`);
+    return String(d.name);
+  }catch(e){alert('登録できませんでした: '+e.message);return null;}
+}
+window.memRegisterCompany=async function(){
+  const name=await registerAccCompany();if(!name)return;
+  memFillCompanySelect(name);
+  memUpdateInvoiceHint();
+};
+// 人材マスタ画面の行ごとの「＋」: 登録後は全行の選択肢を新しい一覧で描き直す(各行の選択値は保つ)
+window.cmRegisterCompany=async function(i){
+  const name=await registerAccCompany();if(!name)return;
+  document.querySelectorAll('select[id^="cm-co-"]').forEach(sel=>memFillCompanySelect(sel.value,sel));
+  const sel=$('cm-co-'+i);if(sel)memFillCompanySelect(name,sel);
+};
 
 // 金額が「本人から見て非表示」になる電話番号 (正規化済み) の集合。
 // 非表示条件 = 法人/社員区分の非オーナー。 admin/super_admin は除外 (本人は自分の金額が見える)。
@@ -3090,8 +3139,8 @@ async function loadMembers(){
   }
   allMembers=data||[];
   renderMemberList();
-  // ツールの会社名候補をバックグラウンドで取得 (datalist サジェスト用、 失敗無視)
-  loadToolCompanies();
+  // 会計マスタの会社名候補をバックグラウンドで取得 (編集モーダルの選択肢用、 失敗無視)
+  loadAccCompanies();
   // 各ツールの区分から「金額非表示」の人を判定 → 取得後に再描画してバッジ表示
   loadBizTypes().then(()=>renderMemberList());
 }
@@ -3242,7 +3291,9 @@ window.openMemberEdit=async function(id){
   $('mem-edit-title').textContent=`✏ ${p.display_name||'(無名)'} を編集`;
   $('mem-edit-name').value=p.display_name||'';
   $('mem-edit-phone').value=p.phone||'';
-  $('mem-edit-company').value=p.company||'';
+  memFillCompanySelect(p.company||'');
+  // 候補が未取得なら取得後に描き直す(その間に選び直されていたらその値を保つ)
+  if(!accCompanies)loadAccCompanies().then(()=>{if($('mem-edit-save-btn').dataset.id===id){memFillCompanySelect($('mem-edit-company').value);memUpdateInvoiceHint();}});
   $('mem-edit-position').value=p.position||'';
   $('mem-edit-invoice').value=p.invoice_number||'';
   $('mem-edit-site').value=p.site||'';
@@ -3251,11 +3302,6 @@ window.openMemberEdit=async function(id){
   // 既に登録済みの site 値を datalist のサジェストに反映
   const uniqueSites=[...new Set(allMembers.map(m=>m.site).filter(Boolean))].sort();
   $('site-suggestions').innerHTML=uniqueSites.map(s=>`<option value="${escHtml(s)}">`).join('');
-  // 会社名サジェスト: NexPort profiles の既登録会社名 + 各ツール (askul/delivery) の
-  // 所属法人名をマージ (タイポ・表記ゆれ防止)
-  const nexportCompanies=allMembers.map(m=>(m.company||'').trim()).filter(Boolean);
-  const uniqueCompanies=[...new Set([...nexportCompanies,...toolCompanies.map(c=>(c||'').trim()).filter(Boolean)])].sort();
-  $('company-suggestions').innerHTML=uniqueCompanies.map(c=>`<option value="${escHtml(c)}">`).join('');
   $('mem-edit-err').style.display='none';
   $('mem-edit-save-btn').dataset.id=id;
   $('member-edit-modal').style.display='flex';
@@ -3374,7 +3420,7 @@ async function autoFillSites(){
 // 各ツール(アスクル/デリバリー)の所属法人から profiles.company を自動補完。
 // 氏名 or 電話で突合。会社名が入れば、会計マスタのT番号が明細に自動反映される (resolveInvoiceNo)。
 async function autoFillCompanies(){
-  if(!confirm('各ツール(アスクル/デリバリー)の所属法人から「会社名」を自動補完します。\n\n対象: 会社名が空欄のメンバーのみ(既設定はスキップ)。\n氏名または電話で突合します。\n\n続行しますか?'))return;
+  if(!confirm('各ツール(アスクル/デリバリー)の所属法人から「会社名」を自動補完します。\n\n対象: 会社名が空欄のメンバーのみ(既設定はスキップ)。\n氏名または電話で突合します。\n会計マスタの法人名に一致したものだけ、正式名称で入れます。\n\n続行しますか?'))return;
   const btn=event?.target;
   if(btn){btn.disabled=true;btn.textContent='取得中...';}
   const rpc=async(base,anon)=>{
@@ -3394,17 +3440,24 @@ async function autoFillCompanies(){
   // RPCは name(full_name)/phone/company_name を返す → buildToolMaps で電話/一意氏名マップに
   const maps=buildToolMaps(rows.map(r=>({name:r.full_name,phone:r.phone,company_name:r.company_name})),'company_name');
   const dup=workDupNames();
-  const updates=[];let skipped=0,noData=0;
+  // ツールの会社名は表記が揺れているので、会計マスタに一致したものだけ「マスタの正式名」で入れる
+  const acc=await loadAccCompanies();
+  if(!acc.length){if(btn){btn.disabled=false;btn.textContent='🏢 会社名を自動補完';}alert('会計マスタの会社一覧を取得できませんでした。時間をおいて再度お試しください。');return;}
+  const accByKey=new Map(acc.map(c=>[normCompanyKey(c.name),c.name]));
+  const updates=[];let skipped=0,noData=0;const notInMaster=new Set();
   for(const m of allMembers){
     if(m.company){skipped++;continue;}
     const co=matchTool(m,maps,dup);// 電話優先・同姓同名は名前一致しない
     if(!co){noData++;continue;}
-    updates.push({id:m.id,company:co});
+    const official=accByKey.get(normCompanyKey(co));
+    if(!official){notInMaster.add(String(co).trim());continue;}
+    updates.push({id:m.id,company:official});
   }
-  if(!updates.length){if(btn){btn.disabled=false;btn.textContent='🏢 会社名を自動補完';}alert(`更新対象なし\n既設定: ${skipped}名 / ツールに所属法人なし(氏名・電話 不一致): ${noData}名`);return;}
+  const nimMsg=notInMaster.size?`\n\n会計マスタに無い表記のため入れなかった会社: ${notInMaster.size}件\n${[...notInMaster].slice(0,8).map(c=>'・'+c).join('\n')}${notInMaster.size>8?'\n...他':''}\n(必要なら編集画面の「＋法人新規登録」で登録してください)`:'';
+  if(!updates.length){if(btn){btn.disabled=false;btn.textContent='🏢 会社名を自動補完';}alert(`更新対象なし\n既設定: ${skipped}名 / ツールに所属法人なし(氏名・電話 不一致): ${noData}名${nimMsg}`);return;}
   const sample=updates.slice(0,8).map(u=>{const m=allMembers.find(x=>x.id===u.id);return `・${m?.display_name||'(無名)'} → ${u.company}`;}).join('\n');
   const more=updates.length>8?`\n...他 ${updates.length-8}名`:'';
-  if(!confirm(`${updates.length}名 に会社名を設定します:\n\n${sample}${more}\n\n設定後、会計マスタにT番号があれば明細に自動表示されます。\n実行しますか?`)){if(btn){btn.disabled=false;btn.textContent='🏢 会社名を自動補完';}return;}
+  if(!confirm(`${updates.length}名 に会社名を設定します:\n\n${sample}${more}${nimMsg}\n\n設定後、会計マスタにT番号があれば明細に自動表示されます。\n実行しますか?`)){if(btn){btn.disabled=false;btn.textContent='🏢 会社名を自動補完';}return;}
   if(btn)btn.textContent='更新中... (0/'+updates.length+')';
   let done=0,errors=0;
   for(let i=0;i<updates.length;i+=10){
