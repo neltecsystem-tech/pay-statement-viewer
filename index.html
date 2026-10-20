@@ -435,8 +435,24 @@ async function doLogin(){
   const err=$('login-err');
   err.style.display='none';
   if(!email||!pw){err.textContent='メールとパスワードを入力してください';err.style.display='block';return;}
-  const {data,error}=await sb.auth.signInWithPassword({email,password:pw});
-  if(error){err.textContent='ログイン失敗: '+error.message;err.style.display='block';return;}
+  // 3回続けて間違えたら15分ロック(2026-10-20・NexPort と同じ)。ログインは EF nexport-login を通して回数を数える。
+  // 成功したら返ったセッションをそのまま使う。ロック中は Supabase 側でも一時停止になる。
+  const show=(m)=>{err.textContent=m;err.style.display='block';};
+  let j={},r;
+  try{
+    r=await fetch(SUPABASE_URL+'/functions/v1/nexport-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'login',email,password:pw})});
+    j=await r.json().catch(()=>({}));
+  }catch(e){return show('ログイン失敗: '+e.message);}
+  if(r.status===423){
+    const t=j.locked_until?new Date(j.locked_until):null;
+    return show('パスワードを3回続けて間違えたため、15分間ログインを止めています'+(t?`（${t.getHours()}:${String(t.getMinutes()).padStart(2,'0')} ごろまで）`:'')+'。お急ぎの場合は管理者に連絡してください。');
+  }
+  if(!r.ok||!j.access_token){
+    if(typeof j.remaining==='number')return show(`メールアドレスかパスワードが違います。あと${j.remaining}回間違えると15分間ログインできなくなります。`);
+    return show('ログイン失敗: '+(j.error||r.status));
+  }
+  const {data,error}=await sb.auth.setSession({access_token:j.access_token,refresh_token:j.refresh_token});
+  if(error)return show('ログイン失敗: '+error.message);
   session=data.session;
   await postLogin();
 }
