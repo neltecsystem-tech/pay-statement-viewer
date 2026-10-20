@@ -1018,8 +1018,15 @@ function renderCompanyAgg(company, ym, tools){
   const _co=normCo(company);
   const _invHit=(invPartners||[]).find(p=>normCo(p.name)===_co&&_okM(p));
   const _hasTax=!!(_invHit&&(_invHit.registered!==false)&&_invHit.invoice_number);
-  const zei=_hasTax?Math.round(total*0.1):0;
-  const net=total+zei-dedTotal;
+  // 支払通知書PDF(buildCompanyCoverHtml)と同一式にする:
+  //   計算手数料・車両リースは課税前に控除 / 消費税=(外注費−計算手数料−リース)×10%(適格のみ) / お支払額=課税後 −その他控除
+  const _calcFee=dedItems.filter(d=>/計算手数料/.test(d.name)).reduce((a,d)=>a+d.amount,0);
+  const _lease=dedItems.filter(d=>/リース/.test(d.name)).reduce((a,d)=>a+d.amount,0);
+  const _otherDed=dedItems.filter(d=>!/計算手数料|リース/.test(d.name)).reduce((a,d)=>a+d.amount,0);
+  const _preTaxDed=_calcFee+_lease;
+  const _taxBase=total-_preTaxDed;
+  const zei=_hasTax?Math.round(_taxBase*0.1):0;
+  const net=_taxBase+zei-_otherDed;
 
   const _pending=(window._companyPending&&window._companyPending.length)?window._companyPending:[];
   const _pendBanner=_pending.length?pendingBannerHtml(_pending):'';
@@ -1045,7 +1052,7 @@ function renderCompanyAgg(company, ym, tools){
     : `<div class="grand-total-card">
         <div class="label">🏢 ${escHtml(company)} / ${escHtml(ym)} ${dedTotal>0?'差引後 ':''}会社合計支払額（3ツール横断）</div>
         <div class="value">${fmtYen(net)}</div>
-        <div style="font-size:11px;color:#92400e;margin-top:6px;">支払先 ${payees.length}件 ／ 外注費 ${fmtYen(total)}${zei>0?` ＋消費税 ${fmtYen(zei)}`:''}${dedTotal>0?` − 控除 ${fmtYen(dedTotal)}`:''}${_hasTax?' <span style="color:#15803d;">(適格)</span>':''} ${errs.length?`／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
+        <div style="font-size:11px;color:#92400e;margin-top:6px;">支払先 ${payees.length}件 ／ 外注費 ${fmtYen(total)}${_preTaxDed>0?` −課税前控除 ${fmtYen(_preTaxDed)}`:''}${zei>0?` ＋消費税 ${fmtYen(zei)}`:''}${_otherDed>0?` −控除 ${fmtYen(_otherDed)}`:''}${_hasTax?' <span style="color:#15803d;">(適格)</span>':''} ${errs.length?`／⚠ 取得エラー: ${errs.join('・')}`:''}</div>
       </div>`);
   // オーナー/担当(または管理者)は、会社の明細に異議申し立て可(中間・部分表示でも可)。確定保留にして担当が確認。
   const _canObject = payees.length && (amAdminNow() || (window._myCentral && (window._myCentral.is_company_owner || window._myCentral.is_company_contact) && normCo(window._myCompany||'')===normCo(company)));
