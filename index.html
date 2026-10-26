@@ -457,9 +457,23 @@ async function doLogin(){
   await postLogin();
 }
 
+// 🔒 2026-10-26 profiles.phone の列は閉じた(20261022c)。電話番号は get_profile_phones 経由で
+//    本人 / 公開にしている人 / 管理者 / 会計の権限者 の分だけ返る。行に phone を足して返す。
+async function withPhones(rows,ids){
+  rows=rows||[];
+  if(!rows.length)return rows;
+  try{
+    const {data}=await sb.rpc('get_profile_phones',{p_ids:ids===undefined?rows.map(r=>r.id):ids});
+    const m={};(data||[]).forEach(r=>{m[r.id]=r.phone;});
+    rows.forEach(r=>{r.phone=m[r.id]??null;});
+  }catch(_){rows.forEach(r=>{if(r.phone===undefined)r.phone=null;});}
+  return rows;
+}
+
 async function postLogin(){
   // profile を取得
-  const {data,error}=await sb.from('profiles').select('id, display_name, role, phone, is_company_owner, invoice_number').eq('id',session.user.id).maybeSingle();
+  const {data,error}=await sb.from('profiles').select('id, display_name, role, is_company_owner, invoice_number').eq('id',session.user.id).maybeSingle();
+  if(data)await withPhones([data]);
   if(error||!data){
     alert('プロファイルが見つかりません: '+(error?.message||'unknown'));
     return doLogout();
@@ -857,7 +871,8 @@ async function searchByName(query){
   results.style.display='block';
   results.innerHTML='<div style="padding:10px;color:var(--text-sub);font-size:12px;"><span class="spinner"></span> 検索中...</div>';
   // 個人は氏名で検索。法人は「会社名でまとめる」候補から現場ツール(新聞/アスクル/デリバリー)横断で集計。
-  const {data,error}=await sb.from('profiles').select('id, display_name, phone, role, company, position, is_company_owner, invoice_number').ilike('display_name','%'+query+'%').limit(50);
+  const {data,error}=await sb.from('profiles').select('id, display_name, role, company, position, is_company_owner, invoice_number').ilike('display_name','%'+query+'%').limit(50);
+  if(data)await withPhones(data);
   if(error){results.innerHTML=`<div style="padding:10px;color:var(--danger);font-size:12px;">検索エラー: ${escHtml(error.message)}</div>`;return;}
   window._searchRes=data||[];
   const canEditOwner=profile?.role==='super_admin';
@@ -1581,8 +1596,13 @@ async function loadTargetProfile(phone, tp){
     return;
   }
   // 電話番号で NexPort profiles を逆引き (オーナー判定用)
-  const {data}=await sb.from('profiles').select('id, display_name, phone, role, is_company_owner, invoice_number').not('phone','is',null);
-  targetProfile=(data||[]).find(p=>normalizePhone(p.phone||'')===phone)||null;
+  const {data:ph}=await sb.rpc('get_profile_phones',{p_ids:null});
+  const hit=(ph||[]).find(p=>normalizePhone(p.phone||'')===phone);
+  targetProfile=null;
+  if(hit){
+    const {data}=await sb.from('profiles').select('id, display_name, role, is_company_owner, invoice_number').eq('id',hit.id).maybeSingle();
+    if(data){data.phone=hit.phone;targetProfile=data;}
+  }
 }
 
 // ── 会計「車両リース・貸付金マスタ」からの控除連携 (RPC get_driver_deductions) ──
@@ -3155,7 +3175,8 @@ async function loadMembers(){
   const listArea=$('admin-mbr-list-area');
   listArea.innerHTML='<div class="card center"><span class="spinner"></span> メンバー一覧読み込み中...</div>';
   $('admin-mbr-count').textContent='';
-  const {data,error}=await sb.from('profiles').select('id, display_name, phone, role, company, position, site, is_company_owner, account_status, created_at, employment_type, invoice_number').order('display_name');
+  const {data,error}=await sb.from('profiles').select('id, display_name, role, company, position, site, is_company_owner, account_status, created_at, employment_type, invoice_number').order('display_name');
+  if(data)await withPhones(data,null);
   if(error){
     listArea.innerHTML=`<div class="card" style="color:var(--danger);">読み込みエラー: ${escHtml(error.message)}</div>`;
     return;
