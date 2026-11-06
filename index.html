@@ -3120,6 +3120,13 @@ window.cmRegisterCompany=async function(i){
   const sel=$('cm-co-'+i);if(sel)memFillCompanySelect(name,sel);
 };
 
+// デリバリーのスタッフ情報は、管理者を確認するサーバー経由で取得する (匿名では呼べない)。
+async function fetchDeliveryMemberMap(kind){
+  const {data,error}=await sb.functions.invoke('tool-member-map',{body:{kind}});
+  if(error)throw new Error('デリバリーの情報を取得できませんでした: '+error.message);
+  return data?.rows||[];
+}
+
 // 金額が「本人から見て非表示」になる電話番号 (正規化済み) の集合。
 // 非表示条件 = 法人/社員区分の非オーナー。 admin/super_admin は除外 (本人は自分の金額が見える)。
 let hiddenPhones=new Set();
@@ -3137,7 +3144,7 @@ async function loadBizTypes(){
   const [shift,askul,delivery]=await Promise.all([
     nexportRpc(),
     fetchRpc('https://erfcsnzdooswgpvgrapb.supabase.co',ASKUL_ANON),
-    fetchRpc('https://ymdaakiwxkjotlmzveom.supabase.co',DELIVERY_ANON),
+    fetchDeliveryMemberMap('biz_type').catch(()=>[]),
   ]);
   const s=new Set();
   // 新聞: biz_type==='法人' で非表示
@@ -3397,7 +3404,7 @@ async function autoFillSites(){
     [shiftRows,askulRows,deliveryRows]=await Promise.all([
       sb.rpc('get_shift_area_map').then(({data})=>data||[]),
       toolRpc('https://erfcsnzdooswgpvgrapb.supabase.co',ASKUL_ANON),
-      toolRpc('https://ymdaakiwxkjotlmzveom.supabase.co',DELIVERY_ANON),
+      fetchDeliveryMemberMap('site'),
     ]);
   }catch(e){
     alert('取得失敗: '+e.message);
@@ -3477,7 +3484,7 @@ async function autoFillCompanies(){
   try{
     const [a,d]=await Promise.all([
       rpc('https://erfcsnzdooswgpvgrapb.supabase.co',ASKUL_ANON),
-      rpc('https://ymdaakiwxkjotlmzveom.supabase.co',DELIVERY_ANON),
+      fetchDeliveryMemberMap('company'),
     ]);
     rows=[...(a||[]),...(d||[])];
   }catch(e){alert('取得失敗: '+e.message);if(btn){btn.disabled=false;btn.textContent='🏢 会社名を自動補完';}return;}
